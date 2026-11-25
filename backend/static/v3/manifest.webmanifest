@@ -1,0 +1,19 @@
+{
+  "name": "Tour Designer",
+  "short_name": "Tour Designer",
+  "description": "Offline-first BeOS 2032 touring desk for artists, DJs & tour managers",
+  "start_url": "/tour",
+  "scope": "/",
+  "display": "standalone",
+  "orientation": "any",
+  "background_color": "#0b0d12",
+  "theme_color": "#0b0d12",
+  "icons": [
+    {
+      "src": "/static/v3/icon.svg",
+      "sizes": "any",
+      "type": "image/svg+xml",
+      "purpose": "any maskable"
+    }
+  ]
+}

@@ -1,0 +1,17 @@
+services:
+  tour-designer:
+    build: .
+    ports:
+      - "8080:8080"
+    environment:
+      ENV: local
+      REPO_BACKEND: sqlite
+      FILE_STORAGE_BACKEND: local
+      LOCAL_DB_PATH: /app/data/tour-designer-v2.sqlite3
+      FILE_VAULT_LOCAL_PATH: /app/data/vault
+    volumes:
+      - td_data:/app/data
+    restart: unless-stopped
+
+volumes:
+  td_data:

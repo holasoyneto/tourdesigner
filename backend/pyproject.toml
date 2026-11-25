@@ -1,0 +1,46 @@
+[project]
+name = "tour-designer-v2"
+version = "2.0.0"
+description = "Lean, stateless, offline-first tour logistics platform for touring crews"
+requires-python = ">=3.12"
+dependencies = [
+    "fastapi>=0.115",
+    "uvicorn[standard]>=0.32",
+    "pydantic>=2.9",
+    "pydantic-settings>=2.6",
+    "httpx>=0.27",
+    "python-multipart>=0.0.12",
+]
+
+[project.optional-dependencies]
+gcp = [
+    "google-cloud-firestore>=2.19",
+    "google-cloud-storage>=2.18",
+    "google-auth>=2.35",
+    "google-api-python-client>=2.150",
+]
+pdf = [
+    "weasyprint>=62",
+]
+dev = [
+    "pytest>=8.3",
+    "ruff>=0.7",
+]
+
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[tool.setuptools.packages.find]
+include = ["app*"]
+
+[tool.ruff]
+line-length = 100
+target-version = "py312"
+
+[tool.ruff.lint]
+select = ["E4", "E7", "E9", "F", "I"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+pythonpath = ["."]
