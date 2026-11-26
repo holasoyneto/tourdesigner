@@ -31,7 +31,7 @@ from app.api.common import (
 from app.config import Settings, get_settings
 from app.domain.auth import constant_time_equals
 from app.domain.models import FileRecord, new_id
-from app.domain.roles import can_access_gig
+from app.domain.roles import can_access_gig, is_owner
 
 router = APIRouter(prefix="/api", tags=["files"])
 _FALLBACK_HMAC_SECRET = secrets.token_hex(32)
@@ -212,9 +212,30 @@ def _fetch_drive_bytes(drive_file_id: str, mime: str) -> tuple[bytes, str] | Non
         return None
 
 
+def delete_gcs_object(bucket_name: str, gcs_key: str) -> None:
+    from google.cloud import storage
+
+    client = storage.Client()
+    blob = client.bucket(bucket_name).blob(gcs_key)
+    blob.delete()
+
+
+def _gcs_key_allowed_for_tenant(gcs_key: str, settings: Settings, tenant_id: str | None) -> bool:
+    if not gcs_key or ".." in gcs_key:
+        return False
+    if settings.tenancy_mode == "multi":
+        return bool(tenant_id) and gcs_key.startswith(f"vault/t/{tenant_id}/")
+    return gcs_key.startswith("vault/")
+
+
 def _mirror_file_to_workspace_drive(repo, file_id: str) -> None:
-    """Queue an asynchronous copy into Google Workspace Shared Drive when mirroring is enabled."""
+    """Queue an asynchronous copy into Google Workspace Shared Drive when mirroring is enabled.
+
+    Hard-blocked in multi-tenant (public) mode so public tenant files can NEVER touch an operator's Drive.
+    """
     settings = get_settings()
+    if settings.tenancy_mode == "multi":
+        return
     if not settings.drive_mirror_enabled or not settings.drive_root_folder_id:
         return
     rec = repo.get_file(file_id)
@@ -235,6 +256,8 @@ def list_files(
         return member
     repo = get_repo(request)
     files = repo.list_files(gig_id=gig_id, person_id=person_id)
+    if not is_owner(member):
+        files = [f for f in files if f.scope != "private"]
     if member.artist_ids:
         visible_gigs = {g.id for g in repo.list_gigs() if can_access_gig(member, g)}
         files = [f for f in files if not f.gig_id or f.gig_id in visible_gigs]
@@ -399,7 +422,9 @@ def download_mcp_signed_file(sig_token: str, request: Request):
     if not rec:
         return err("file_not_found", status=404)
     if settings.file_storage_backend == "gcs" and rec.gcs_key and settings.file_vault_bucket:
-        url = _sign_gcs_url(rec.gcs_key, method="GET")
+        if not _gcs_key_allowed_for_tenant(rec.gcs_key, settings, tenant_id):
+            return err("file_not_found", status=404)
+        url = _sign_gcs_url(rec.gcs_key, method="GET", bucket_name=settings.file_vault_bucket)
         return RedirectResponse(url=url, status_code=302)
 
     local_path = _safe_local_path(rec.object_id, settings, tenant_id)
@@ -417,7 +442,7 @@ def download_mcp_signed_file(sig_token: str, request: Request):
             },
         )
 
-    if rec.drive_file_id:
+    if rec.drive_file_id and settings.tenancy_mode != "multi":
         fetched = _fetch_drive_bytes(rec.drive_file_id, mime)
         if fetched is not None:
             raw_bytes, out_mime = fetched
@@ -445,15 +470,20 @@ def download_file(file_id: str, request: Request, inline: bool = False):
     rec = repo.get_file(file_id)
     if not rec:
         return err("file_not_found", status=404)
+    if rec.scope == "private" and not is_owner(member):
+        return err("file_not_found", status=404)
     if rec.gig_id and member.artist_ids:
         gig = repo.get_gig(rec.gig_id)
         if not gig or not can_access_gig(member, gig):
             return err("file_not_found", status=404)
     settings = get_app_settings(request)
+    tenant_id = get_tenant_id(request)
     if settings.file_storage_backend == "gcs" and rec.gcs_key and settings.file_vault_bucket:
-        url = _sign_gcs_url(rec.gcs_key, method="GET")
+        if not _gcs_key_allowed_for_tenant(rec.gcs_key, settings, tenant_id):
+            return err("file_not_found", status=404)
+        url = _sign_gcs_url(rec.gcs_key, method="GET", bucket_name=settings.file_vault_bucket)
         return ok(url=url, name=rec.name, mime=rec.mime)
-    local_path = _safe_local_path(rec.object_id, settings, get_tenant_id(request))
+    local_path = _safe_local_path(rec.object_id, settings, tenant_id)
     mime = (rec.mime or "application/octet-stream").split(";")[0].strip().lower()
     if local_path and local_path.is_file():
         allow_inline = inline and mime in _SAFE_INLINE_MIMES
@@ -468,7 +498,7 @@ def download_file(file_id: str, request: Request, inline: bool = False):
             },
         )
 
-    if rec.drive_file_id:
+    if rec.drive_file_id and settings.tenancy_mode != "multi":
         fetched = _fetch_drive_bytes(rec.drive_file_id, mime)
         if fetched is not None:
             raw_bytes, out_mime = fetched
@@ -494,10 +524,12 @@ def update_file_meta(file_id: str, request: Request, body: dict[str, Any] = Body
         return member
     repo = get_repo(request)
     rec = repo.get_file(file_id)
-    if not rec:
+    if not rec or (rec.scope == "private" and not is_owner(member)):
         return err("file_not_found", status=404)
     for k in ("name", "pinned", "gig_id", "person_id", "doc_kind", "doc_country", "doc_expires", "scope"):
         if k in body:
+            if k == "scope" and not is_owner(member):
+                continue
             val = _sanitize_filename(str(body[k])) if k == "name" else body[k]
             setattr(rec, k, val)
     saved = repo.upsert_file(rec)
@@ -511,10 +543,22 @@ def delete_file(file_id: str, request: Request) -> JSONResponse:
         return member
     repo = get_repo(request)
     rec = repo.get_file(file_id)
-    if not rec:
+    if not rec or (rec.scope == "private" and not is_owner(member)):
         return err("file_not_found", status=404)
     repo.delete_file(file_id)
-    local_path = _safe_local_path(rec.object_id, get_app_settings(request), get_tenant_id(request))
+    settings = get_app_settings(request)
+    tenant_id = get_tenant_id(request)
+    if (
+        settings.file_storage_backend == "gcs"
+        and rec.gcs_key
+        and settings.file_vault_bucket
+        and _gcs_key_allowed_for_tenant(rec.gcs_key, settings, tenant_id)
+    ):
+        try:
+            delete_gcs_object(settings.file_vault_bucket, rec.gcs_key)
+        except Exception:
+            pass
+    local_path = _safe_local_path(rec.object_id, settings, tenant_id)
     if local_path and local_path.is_file():
         local_path.unlink(missing_ok=True)
     record_audit(request, "delete_file", file_id, f"Deleted {rec.name} by {member.name}")

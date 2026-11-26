@@ -1165,7 +1165,7 @@ async def _call_tool(
                 local_path = _safe_local_path(rec.object_id, settings, tenant_id)
                 if local_path and local_path.is_file() and local_path.stat().st_size <= max_preview:
                     raw_preview = local_path.read_bytes()
-            if raw_preview is None and rec.drive_file_id:
+            if raw_preview is None and rec.drive_file_id and (not settings or settings.tenancy_mode != "multi"):
                 fetched = _fetch_drive_bytes(rec.drive_file_id, mime)
                 if fetched is not None and len(fetched[0]) <= max_preview:
                     raw_preview, preview_mime = fetched

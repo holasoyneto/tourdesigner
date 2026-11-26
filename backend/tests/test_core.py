@@ -972,7 +972,7 @@ def test_public_beta_self_service_mcp_bearer_prompts_and_reminders(tmp_path: Pat
         # Tampered signed URL fails closed
         assert client.get(dl_path + "tamper").status_code == 401
 
-        # 3c. Legacy v1 Shared Drive fallback (drive_file_id) streams via both /api/files/.../download & MCP get_file
+        # 3c. In multi-tenant (public) mode, legacy operator Drive fallback (drive_file_id) MUST be hard-blocked
         from app.domain.models import FileRecord as TdFileRecord
 
         t_repo = app.state.tenant_manager.get_repo(client.get("/tourdesigner/api/auth/me").json()["tenant_id"])
@@ -989,13 +989,11 @@ def test_public_beta_self_service_mcp_bearer_prompts_and_reminders(tmp_path: Pat
         monkeypatch.setattr("app.api.files._fetch_drive_bytes", lambda fid, m: (b"%PDF-1.4\n%%", "application/pdf"))
         monkeypatch.setattr("app.mcp.server._fetch_drive_bytes", lambda fid, m: (b"%PDF-1.4\n%%", "application/pdf"))
         dl_drive = client.get(f"/tourdesigner/api/files/{drive_rec.id}/download")
-        assert dl_drive.status_code == 200
-        assert dl_drive.content == b"%PDF-1.4\n%%"
+        assert dl_drive.status_code == 404
         mcp_drive = mcp_call("get_file", {"file_id": drive_rec.id})
         assert mcp_drive["ok"] is True
         dl_signed_drive = client.get(mcp_drive["download_url"].replace("https://example.com", ""))
-        assert dl_signed_drive.status_code == 200
-        assert dl_signed_drive.content == b"%PDF-1.4\n%%"
+        assert dl_signed_drive.status_code == 404
 
         # 4. Revoking personal MCP key immediately blocks further calls
         assert client.delete("/tourdesigner/api/auth/my-mcp-key").status_code == 200
@@ -1407,4 +1405,67 @@ def test_github_update_check(tmp_path: Path, monkeypatch):
         assert d3["enabled"] is True
         assert d3["offline"] is True
         assert d3["update_available"] is False
+    get_settings.cache_clear()
+
+
+def test_public_file_vault_isolation_and_drive_block(tmp_path: Path, monkeypatch):
+    """Multi-tenant mode hard-blocks Google Drive mirroring, validates GCS tenant prefixes, and isolates private files."""
+    from app.api import files as files_api
+    from app.config import get_settings
+    from app.domain.models import FileRecord
+
+    client, repo = _make_client(tmp_path, password="owner-secret-password")
+
+    # 1. Hard-block Drive mirroring in multi-tenant mode even if env vars are misconfigured
+    monkeypatch.setenv("TENANCY_MODE", "multi")
+    monkeypatch.setenv("DRIVE_MIRROR_ENABLED", "true")
+    monkeypatch.setenv("DRIVE_ROOT_FOLDER_ID", "0A_SHOULD_NEVER_TOUCH")
+    get_settings.cache_clear()
+
+    rec = repo.upsert_file(
+        FileRecord(
+            object_id="obj_test_drive_block",
+            name="passport.pdf",
+            mime="application/pdf",
+            size=128,
+            gcs_key="vault/t/tenant_a/obj_test_drive_block",
+            scope="private",
+        )
+    )
+    files_api._mirror_file_to_workspace_drive(repo, rec.id)
+    reloaded = repo.get_file(rec.id)
+    assert reloaded is not None
+    assert reloaded.mirror_status != "pending"
+
+    # 2. Strict tenant GCS key prefix validation
+    multi_cfg = Settings(tenancy_mode="multi")
+    assert files_api._gcs_key_allowed_for_tenant("vault/t/tenant_a/obj_1", multi_cfg, "tenant_a") is True
+    assert files_api._gcs_key_allowed_for_tenant("vault/t/tenant_b/obj_1", multi_cfg, "tenant_a") is False
+    assert files_api._gcs_key_allowed_for_tenant("vault/v2/obj_1", multi_cfg, "tenant_a") is False
+    assert files_api._gcs_key_allowed_for_tenant("vault/t/tenant_a/../tenant_b/obj_1", multi_cfg, "tenant_a") is False
+    assert files_api._gcs_key_allowed_for_tenant("vault/t/tenant_a/obj_1", multi_cfg, None) is False
+
+    # 3. Private-scope files (passports/visas) are strictly owner-only
+    monkeypatch.setenv("TENANCY_MODE", "single")
+    get_settings.cache_clear()
+    editor_key = "tdk_editor_isolation_test_key"
+    repo.upsert_user(
+        User(
+            id="usr_editor_iso",
+            name="Crew Editor",
+            role="editor",
+            login_key_hash=hash_secret(editor_key),
+        )
+    )
+    with client:
+        # Editor signs in via login key
+        r_login = client.post("/api/auth/key-login", json={"key": editor_key})
+        assert r_login.status_code == 200
+        # Private file must not appear in list or be downloadable/deletable by editor
+        r_list = client.get("/api/files")
+        assert r_list.status_code == 200
+        assert all(f["id"] != rec.id for f in r_list.json()["files"])
+        assert client.get(f"/api/files/{rec.id}/download").status_code == 404
+        assert client.patch(f"/api/files/{rec.id}", json={"scope": "crew"}).status_code == 404
+        assert client.delete(f"/api/files/{rec.id}").status_code == 404
     get_settings.cache_clear()
