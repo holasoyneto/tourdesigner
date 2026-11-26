@@ -1,6 +1,9 @@
+import { Check, Copy, ExternalLink, Terminal } from 'lucide-react';
 import { useState } from 'react';
 import { api } from '../api/client';
+import { fullUrl, withBase } from '../lib/basePath';
 import type { Locale } from '../types';
+import { buildInstallPrompts } from './HelpPage';
 
 interface Props {
   locale: Locale;
@@ -15,6 +18,8 @@ type PreviewTab = 'sheet' | 'privacy' | 'advance';
 export function LandingPage({ locale, onLocale, hostedPlan, landingVideoUrl, onNavigate }: Props) {
   const fr = locale === 'fr';
   const [previewTab, setPreviewTab] = useState<PreviewTab>('privacy');
+  const [installTab, setInstallTab] = useState<string>('docker');
+  const [copiedPrompt, setCopiedPrompt] = useState(false);
   const [leadName, setLeadName] = useState('');
   const [leadEmail, setLeadEmail] = useState('');
   const [leadOrg, setLeadOrg] = useState('');
@@ -85,6 +90,14 @@ export function LandingPage({ locale, onLocale, hostedPlan, landingVideoUrl, onN
             {hostedPlan && <span className="dk-venue hidden sm:inline">· {hostedPlan}</span>}
           </div>
           <div className="ml-auto flex items-center gap-1.5 pb-[3px]">
+            <button
+              type="button"
+              className="btn"
+              style={{ minHeight: 24, padding: '0 10px', fontSize: 12 }}
+              onClick={() => onNavigate('/help')}
+            >
+              {fr ? 'Aide & IA' : 'Help & AI'}
+            </button>
             <button
               type="button"
               className="btn"
@@ -352,6 +365,102 @@ export function LandingPage({ locale, onLocale, hostedPlan, landingVideoUrl, onN
             </div>
           </div>
 
+          {/* 1-Prompt AI Install for Claude Code & Codex */}
+          {(() => {
+            const originRoot =
+              typeof window !== 'undefined' ? fullUrl('/').replace(/\/$/, '') : 'https://www.djmandragora.com/tourdesigner';
+            const prompts = buildInstallPrompts(originRoot, fr);
+            const active = prompts.find((p) => p.id === installTab) || prompts[0];
+            return (
+              <div className="border-t border-[var(--cv-line)] pt-5 space-y-3">
+                <div className="flex flex-wrap items-center justify-between gap-2">
+                  <div className="space-y-0.5">
+                    <div className="flex items-center gap-2 font-bold text-sm" style={{ color: 'var(--cv-ink)' }}>
+                      <Terminal className="h-4 w-4" style={{ color: 'var(--cv-y1)' }} />
+                      <span>
+                        {fr
+                          ? 'Installation en 1 prompt (Claude Code / Codex)'
+                          : 'Install for your team in 1 prompt (Claude Code / Codex)'}
+                      </span>
+                    </div>
+                    <p className="sub m-0 text-xs">
+                      {fr
+                        ? 'Collez ce prompt dans Claude Code, Codex ou Cursor — il lit notre doc LLM et déploie Tour Designer pour votre équipe.'
+                        : 'Paste this into Claude Code, OpenAI Codex, or Cursor — it reads our LLM integration spec and installs Tour Designer for your crew.'}
+                    </p>
+                  </div>
+                  <div className="segs max-w-full overflow-x-auto">
+                    {prompts.map((p) => (
+                      <button
+                        key={p.id}
+                        type="button"
+                        className={`seg whitespace-nowrap${installTab === p.id ? ' seg--on' : ''}`}
+                        onClick={() => {
+                          setInstallTab(p.id);
+                          setCopiedPrompt(false);
+                        }}
+                      >
+                        {p.label}
+                      </button>
+                    ))}
+                  </div>
+                </div>
+
+                <div className="border border-[var(--cv-line2)] bg-[var(--cv-paper)] p-3 sm:p-3.5 space-y-2.5">
+                  <pre
+                    className="m-0 whitespace-pre-wrap break-words mono text-[11.5px] sm:text-xs leading-relaxed"
+                    style={{ color: 'var(--cv-ink)' }}
+                  >
+                    {active.prompt}
+                  </pre>
+                  <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 border-t border-[var(--cv-line)] pt-2.5">
+                    <div className="flex flex-wrap items-center gap-3 text-[11.5px] sub">
+                      <button
+                        type="button"
+                        className="underline font-semibold"
+                        style={{ background: 'none', border: 0, padding: 0, color: 'var(--cv-ink)', cursor: 'pointer' }}
+                        onClick={() => onNavigate('/help')}
+                      >
+                        {fr ? 'Guide complet & intégration SI →' : 'Full Help & IT integration guide →'}
+                      </button>
+                      <a
+                        href={withBase('/llms.txt')}
+                        target="_blank"
+                        rel="noreferrer"
+                        className="mono underline inline-flex items-center gap-1"
+                        style={{ color: 'var(--cv-ink2)' }}
+                      >
+                        /llms.txt <ExternalLink className="h-3 w-3" />
+                      </a>
+                      <a
+                        href={withBase('/llms-full.txt')}
+                        target="_blank"
+                        rel="noreferrer"
+                        className="mono underline inline-flex items-center gap-1"
+                        style={{ color: 'var(--cv-ink2)' }}
+                      >
+                        /llms-full.txt <ExternalLink className="h-3 w-3" />
+                      </a>
+                    </div>
+                    <button
+                      type="button"
+                      className="btn btn--def w-full sm:w-auto justify-center"
+                      style={{ minHeight: 38, padding: '0 14px', fontWeight: 700 }}
+                      onClick={() => {
+                        navigator.clipboard?.writeText(active.prompt).catch(() => undefined);
+                        setCopiedPrompt(true);
+                        window.setTimeout(() => setCopiedPrompt(false), 2000);
+                      }}
+                    >
+                      {copiedPrompt ? <Check className="h-3.5 w-3.5" /> : <Copy className="h-3.5 w-3.5" />}
+                      {copiedPrompt ? (fr ? 'Copié !' : 'Copied!') : fr ? 'Copier le prompt' : 'Copy prompt'}
+                    </button>
+                  </div>
+                </div>
+              </div>
+            );
+          })()}
+
           {/* Access & Management Inquiry */}
           <div className="grid gap-4 border-t border-[var(--cv-line)] pt-5 md:grid-cols-2">
             <div className="border border-[var(--cv-line)] bg-[var(--cv-paper2)] p-3.5 sm:p-4 space-y-2.5 text-xs">
@@ -374,7 +483,7 @@ export function LandingPage({ locale, onLocale, hostedPlan, landingVideoUrl, onN
                   {fr ? 'Créer un compte gratuit' : 'Create free account'}
                 </button>
                 <a
-                  href="https://github.com/tour-designer/tour-designer"
+                  href="https://github.com/holasoyneto/tourdesigner"
                   target="_blank"
                   rel="noopener noreferrer"
                   className="btn w-full sm:w-auto justify-center"
@@ -446,7 +555,18 @@ export function LandingPage({ locale, onLocale, hostedPlan, landingVideoUrl, onN
 
           <div className="flex flex-wrap items-center justify-between gap-2 border-t border-[var(--cv-line)] pt-3 text-[11px] sub">
             <span>Tour Designer · AGPL-3.0-only · Zero tracking cookies</span>
-            <div className="flex gap-3">
+            <div className="flex flex-wrap gap-3">
+              <button
+                type="button"
+                className="underline"
+                style={{ background: 'none', border: 0, padding: 0, color: 'inherit', cursor: 'pointer' }}
+                onClick={() => onNavigate('/help')}
+              >
+                {fr ? 'Aide & Docs LLM' : 'Help & LLM Docs'}
+              </button>
+              <a href={withBase('/llms.txt')} target="_blank" rel="noreferrer" className="underline mono" style={{ color: 'inherit' }}>
+                llms.txt
+              </a>
               <button
                 type="button"
                 className="underline"

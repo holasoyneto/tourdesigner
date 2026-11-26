@@ -18,6 +18,7 @@ const CommunityShareModal = lazy(() =>
 const ContactsPage = lazy(() => import('./features/ContactsPage').then((m) => ({ default: m.ContactsPage })));
 const DemoPage = lazy(() => import('./features/DemoPage').then((m) => ({ default: m.DemoPage })));
 const FilesPage = lazy(() => import('./features/FilesPage').then((m) => ({ default: m.FilesPage })));
+const HelpPage = lazy(() => import('./features/HelpPage').then((m) => ({ default: m.HelpPage })));
 const FirstDayChecklist = lazy(() =>
   import('./features/FirstDayChecklist').then((m) => ({ default: m.FirstDayChecklist })),
 );
@@ -470,6 +471,13 @@ export function App() {
           onLocale={setLocale}
           onNavigate={navigate}
         />
+      </Suspense>
+    );
+  }
+  if (path === '/help') {
+    return (
+      <Suspense fallback={<div className="dk-root items-center justify-center text-[var(--cv-on-desk)]">tourdesigner…</div>}>
+        <HelpPage locale={locale} onLocale={setLocale} onNavigate={navigate} />
       </Suspense>
     );
   }

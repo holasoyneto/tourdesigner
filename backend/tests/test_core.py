@@ -1280,6 +1280,20 @@ def test_p1_p2_landing_seo_interest_multidate_ics_and_digest(tmp_path: Path, mon
         sm = client.get("/sitemap.xml")
         assert sm.status_code == 200
         assert "/demo" in sm.text
+        assert "/help" in sm.text
+        assert "/llms.txt" in sm.text
+
+        llms = client.get("/llms.txt")
+        assert llms.status_code == 200
+        assert "llms-full.txt" in llms.text
+        assert "docker compose" in llms.text
+
+        llms_full = client.get("/llms-full.txt")
+        assert llms_full.status_code == 200
+        assert "LLM & IT Systems Integration Guide" in llms_full.text
+
+        help_page = client.get("/help", follow_redirects=False)
+        assert help_page.status_code == 200
 
         # 2. Public interest form validation + persistence
         assert client.post("/api/public/interest", json={"email": "bad"}).status_code == 400

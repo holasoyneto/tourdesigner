@@ -329,11 +329,65 @@ def create_app(settings: Settings | None = None, repo: TourRepo | None = None) -
         ]
         return Response(content="\n".join(lines) + "\n", media_type="text/plain")
 
+    @app.get("/llms.txt")
+    def llms_txt(request: Request):
+        origin = (cfg.public_origin or "").rstrip("/") or str(request.base_url).rstrip("/")
+        root = f"{origin}{base_path}"
+        lines = [
+            "# Tour Designer",
+            "",
+            "> Offline-first touring desk, roadsheets, document vault, and Model Context Protocol (MCP) server for DJs, bands, roadies, and tour managers (AGPL-3.0-only).",
+            "",
+            "## Quick Links",
+            f"- Home & 1-Prompt Install: {root}/",
+            f"- Interactive 20-Date Demo (no signup): {root}/demo",
+            f"- Help & Team IT Integration Guide: {root}/help",
+            f"- Full LLM & IT Integration Handbook: {root}/llms-full.txt",
+            "- GitHub Repository (AGPL-3.0): https://github.com/holasoyneto/tourdesigner",
+            "",
+            "## 60-Second Self-Host (Docker Compose)",
+            "```bash",
+            "git clone https://github.com/holasoyneto/tourdesigner.git && cd tourdesigner",
+            "cp .env.example .env && docker compose up -d --build",
+            "```",
+            "",
+            "## Key Integration Endpoints",
+            f"- Health probe: `{root}/api/health`",
+            f"- MCP server (Claude / ChatGPT / Codex): `{root}/mcp`",
+            f"- Revocable iCalendar feed: `{root}/api/calendar/{{token}}.ics`",
+            f"- Bulk CSV / Master Tour / Email intake: `{root}/api/intake/extract`",
+            f"- J-1 Crew digest webhook (SMTP / Resend): `{root}/api/cron/gig-digest`",
+        ]
+        return Response(content="\n".join(lines) + "\n", media_type="text/plain; charset=utf-8")
+
+    @app.get("/llms-full.txt")
+    def llms_full_txt():
+        candidates = [
+            Path(__file__).resolve().parents[2] / "docs" / "LLM_INTEGRATION.md",
+            Path(__file__).resolve().parents[1] / "docs" / "LLM_INTEGRATION.md",
+            Path("/app/docs/LLM_INTEGRATION.md"),
+        ]
+        for p in candidates:
+            if p.exists():
+                return Response(content=p.read_text(encoding="utf-8"), media_type="text/plain; charset=utf-8")
+        return Response(
+            content="# Tour Designer\n\nSee https://github.com/holasoyneto/tourdesigner/blob/main/docs/LLM_INTEGRATION.md\n",
+            media_type="text/plain; charset=utf-8",
+        )
+
     @app.get("/sitemap.xml")
     def sitemap_xml(request: Request):
         origin = (cfg.public_origin or "").rstrip("/") or str(request.base_url).rstrip("/")
         root = f"{origin}{base_path}"
-        urls = [f"{root}/", f"{root}/demo", f"{root}/login", f"{root}/legal/privacy", f"{root}/legal/terms"]
+        urls = [
+            f"{root}/",
+            f"{root}/demo",
+            f"{root}/help",
+            f"{root}/llms.txt",
+            f"{root}/login",
+            f"{root}/legal/privacy",
+            f"{root}/legal/terms",
+        ]
         body = (
             '<?xml version="1.0" encoding="UTF-8"?>\n'
             '<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">\n'
@@ -349,7 +403,7 @@ def create_app(settings: Settings | None = None, repo: TourRepo | None = None) -
             return JSONResponse({"ok": False, "error": "not_found"}, status_code=404)
         path = f"/{full_path}"
         is_public_route = (
-            path in {"/login", "/revoked", "/legal/privacy", "/legal/terms", "/demo"}
+            path in {"/login", "/revoked", "/legal/privacy", "/legal/terms", "/demo", "/help"}
             or (path == "/" and cfg.tenancy_mode == "multi")
             or path.startswith("/link/")
         )

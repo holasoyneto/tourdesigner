@@ -11,7 +11,7 @@ Replace chaotic WhatsApp threads, fragile spreadsheets, and bloated touring SaaS
 Don't want to configure servers by hand? **Copy & paste this prompt into Claude Code, Gemini CLI, Codex, Antigravity, or Cursor** and let your agent install and configure Tour Designer for you and your entire team:
 
 ```text
-Clone Tour Designer (https://github.com/<your-org>/tour-designer) and install it for me and my touring team.
+Clone Tour Designer (https://github.com/holasoyneto/tourdesigner), read docs/LLM_INTEGRATION.md, and install it for me and my touring team.
 Check my OS (Linux, Windows, or macOS) and ask me 4 quick questions first:
 1. Artist / Team name
 2. Local self-hosted (SQLite) OR Google Cloud Run + Firestore + GCS on my Google Workspace / GCP project

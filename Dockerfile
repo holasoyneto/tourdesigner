@@ -21,6 +21,7 @@ WORKDIR /app
 COPY backend/pyproject.toml ./
 COPY backend/app ./app
 COPY backend/scripts ./scripts
+COPY docs ./docs
 RUN pip install --no-cache-dir ".[gcp]" && mkdir -p /app/data/vault
 COPY --from=web /build/backend/static ./static
 
