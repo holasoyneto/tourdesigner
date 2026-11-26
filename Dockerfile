@@ -1,5 +1,5 @@
 # Stage 1: Build static web & PWA bundle
-FROM node:22-slim AS web
+FROM node:25-slim AS web
 WORKDIR /build/frontend
 COPY frontend/package*.json ./
 RUN npm ci --no-audit --no-fund
