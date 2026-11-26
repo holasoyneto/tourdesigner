@@ -26,7 +26,7 @@ A prebuilt frontend ships in `backend/static/v3`, so the backend runs without No
 - Owner login password is `BASIC_AUTH_PASSWORD` (user `BASIC_AUTH_USER`, default `owner`). Empty = open mode, only safe on `127.0.0.1`. Set it before binding `0.0.0.0` or deploying.
 - Storage: `REPO_BACKEND=sqlite|firestore`, `FILE_STORAGE_BACKEND=local|gcs`. Firestore/GCS need `pip install -e ".[gcp]"`.
 - AI intake: `VERTEX_PROJECT` + `VERTEX_LOCATION`, or `GEMINI_API_KEY` / `ANTHROPIC_API_KEY` / `OPENAI_API_KEY`. All empty = offline deterministic parser (still works).
-- `docker-compose.yml` does **not** load an `.env` file. To set a password or keys under Docker, add an `env_file:` entry or `environment:` keys, or use `docker run -e ...`.
+- `docker-compose.yml` loads the root `.env` if present (Compose 2.24+). Its `environment:` block pins the SQLite/vault paths to the `td_data` volume. Plain `docker run` needs `-e` or `--env-file .env`.
 - Subpath hosting: `BASE_PATH=/tourdesigner` + `PUBLIC_ORIGIN=https://example.com`.
 
 ## Secrets and safety

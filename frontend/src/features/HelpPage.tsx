@@ -19,8 +19,8 @@ export function buildInstallPrompts(originUrl: string, fr: boolean) {
       label: fr ? 'Auto-hébergement Docker (60s)' : 'Self-Host Docker (60s)',
       audience: fr ? 'VPS Linux, Mac Mini, serveur d’équipe' : 'Linux VPS, Mac Mini, team server',
       prompt: fr
-        ? `Lis la doc d’intégration ${llmsUrl} puis clone ${REPO_URL} et installe Tour Designer pour mon équipe de tournée avec Docker Compose (SQLite + stockage local dans ./data). Génère un SESSION_SECRET aléatoire et un mot de passe propriétaire fort dans .env, configure un reverse proxy HTTPS (Caddy ou Nginx) si un domaine est disponible, vérifie /api/health, et donne-moi l’URL de connexion et la commande de sauvegarde quotidienne.`
-        : `Read the integration guide at ${llmsUrl}, then clone ${REPO_URL} and install Tour Designer for my touring team using Docker Compose (SQLite + local vault in ./data). Generate a random SESSION_SECRET and strong owner password in .env, wire an HTTPS reverse proxy (Caddy or Nginx) if we have a domain, verify /api/health, and hand me the login URL plus a nightly backup command.`,
+        ? `Lis la doc d’intégration ${llmsUrl} puis clone ${REPO_URL} et installe Tour Designer pour mon équipe de tournée avec Docker Compose (SQLite + stockage local dans le volume td_data). Copie .env.example vers .env et définis un mot de passe propriétaire fort (BASIC_AUTH_PASSWORD), configure un reverse proxy HTTPS (Caddy ou Nginx) si un domaine est disponible, vérifie /api/health, et donne-moi l’URL de connexion et la commande de sauvegarde quotidienne.`
+        : `Read the integration guide at ${llmsUrl}, then clone ${REPO_URL} and install Tour Designer for my touring team using Docker Compose (SQLite + local vault in the td_data volume). Copy .env.example to .env and set a strong owner password (BASIC_AUTH_PASSWORD), wire an HTTPS reverse proxy (Caddy or Nginx) if we have a domain, verify /api/health, and hand me the login URL plus a nightly backup command.`,
     },
     {
       id: 'it',

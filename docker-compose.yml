@@ -1,6 +1,10 @@
 services:
   tour-designer:
     build: .
+    # Optional: cp .env.example .env to set BASIC_AUTH_PASSWORD, ARTIST_NAME, AI keys
+    env_file:
+      - path: .env
+        required: false
     ports:
       - "8080:8080"
     environment:

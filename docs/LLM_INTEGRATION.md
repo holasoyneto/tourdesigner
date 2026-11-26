@@ -16,16 +16,16 @@ Best for a single artist, tour manager, or small management team running on a Ma
 git clone https://github.com/holasoyneto/tourdesigner.git
 cd tourdesigner
 cp .env.example .env
-# Edit .env: set OWNER_PASSWORD and SESSION_SECRET (openssl rand -hex 32)
+# Edit .env: set BASIC_AUTH_PASSWORD (owner login) and ARTIST_NAME before exposing the port
 docker compose up -d --build
 # Verify health:
 curl -sf http://localhost:8080/api/health
 ```
 
 ### Default Storage (Zero External Cloud Dependencies)
-- `REPO_BACKEND=sqlite` -> persists database at `/app/data/tourdesigner.db` (mounted via Docker volume `./data:/app/data`)
-- `FILE_STORAGE_BACKEND=local` -> persists encrypted/private passports, visas, boarding passes, and riders under `/app/data/files`
-- **Backups:** Back up `/app/data` nightly (SQLite online backup or `sqlite3 /app/data/tourdesigner.db ".backup /backups/td.db"` + rsync `/app/data/files`).
+- `REPO_BACKEND=sqlite` -> persists database at `/app/data/tour-designer-v2.sqlite3` (Docker named volume `td_data` mounted at `/app/data`)
+- `FILE_STORAGE_BACKEND=local` -> persists encrypted/private passports, visas, boarding passes, and riders under `/app/data/vault`
+- **Backups:** Back up `/app/data` nightly (SQLite online backup or `sqlite3 /app/data/tour-designer-v2.sqlite3 ".backup /backups/td.db"` + rsync `/app/data/vault`).
 
 ### HTTPS Reverse Proxy (Caddy Example)
 ```caddyfile
@@ -43,9 +43,10 @@ For agencies or multi-artist rosters needing zero-ops autoscaling across regions
 
 - `TENANCY_MODE=multi` (or `single` for one dedicated team)
 - `REPO_BACKEND=firestore` + `FIRESTORE_PROJECT=<gcp-project>`
-- `FILE_STORAGE_BACKEND=gcs` + `GCS_BUCKET=<private-bucket>`
+- `FILE_STORAGE_BACKEND=gcs` + `FILE_VAULT_BUCKET=<private-bucket>` (install the backend with `.[gcp]`)
 - `GOOGLE_OAUTH_CLIENT_ID` / `GOOGLE_OAUTH_CLIENT_SECRET` (add `<PUBLIC_ORIGIN><BASE_PATH>/api/auth/google/callback` to Authorized Redirect URIs)
-- `SESSION_SECRET` stored in Secret Manager (used to sign cookies and stateless HMAC MCP `read_token`s across instances)
+- `BASIC_AUTH_PASSWORD` from Secret Manager in `single` mode (owner login)
+- No session or HMAC secret to configure: the MCP `read_token` signing key is generated once and stored in the database, so every Cloud Run instance shares it automatically
 
 ---
 
@@ -64,7 +65,7 @@ For agencies or multi-artist rosters needing zero-ops autoscaling across regions
 - **J-1 Crew Digest:** Wire Cloud Scheduler / cron to `POST /api/cron/gig-digest` (supports `?dry_run=1` for verification). Configure either:
   - `RESEND_API_KEY` + `ALERT_FROM_EMAIL`, or
   - `SMTP_HOST`, `SMTP_PORT` (587), `SMTP_USER`, `SMTP_PASSWORD`, `ALERT_FROM_EMAIL`
-- **Agency / Inquiry Routing:** Set `INTEREST_NOTIFY_EMAIL` (and optional `INTEREST_WEBHOOK_URL` for Slack/Discord/n8n) to receive public inquiries from `POST /api/public/interest`.
+- **Agency / Inquiry Routing:** Set `INTEREST_NOTIFY_EMAIL` (and optional `INTEREST_NOTIFY_WEBHOOK_URL` for Slack/Discord/n8n) to receive public inquiries from `POST /api/public/interest`.
 
 ### D. Connecting Claude / ChatGPT / Custom AI Agents (MCP Server)
 Tour Designer includes a built-in **Model Context Protocol (MCP)** endpoint at `<PUBLIC_ORIGIN><BASE_PATH>/mcp`:
@@ -89,11 +90,11 @@ Tour Designer includes a built-in **Model Context Protocol (MCP)** endpoint at `
 | :--- | :--- | :--- |
 | `TENANCY_MODE` | `single` | `single` (one team) or `multi` (self-serve workspaces + landing page) |
 | `REPO_BACKEND` | `sqlite` | `sqlite` (local file) or `firestore` (stateless GCP) |
-| `FILE_STORAGE_BACKEND` | `local` | `local` (`/app/data/files`) or `gcs` (Google Cloud Storage) |
+| `FILE_STORAGE_BACKEND` | `local` | `local` (`FILE_VAULT_LOCAL_PATH`) or `gcs` (Google Cloud Storage) |
 | `BASE_PATH` | `""` | Optional subpath prefix (e.g. `/tourdesigner`) |
 | `PUBLIC_ORIGIN` | `""` | Canonical public URL (e.g. `https://tour.yourdomain.com`) |
-| `OWNER_PASSWORD` | — | Initial owner password (single-tenant mode) |
-| `SESSION_SECRET` | auto | 32+ byte secret for sessions & stateless MCP `read_token` HMAC |
+| `BASIC_AUTH_PASSWORD` | — | Owner login password (user `BASIC_AUTH_USER`, default `owner`). Empty = open mode, loopback only |
+| `FILE_VAULT_BUCKET` | — | Private GCS bucket when `FILE_STORAGE_BACKEND=gcs` |
 | `GOOGLE_OAUTH_CLIENT_ID` | — | Optional Google Sign-In OAuth client ID |
 | `GOOGLE_OAUTH_CLIENT_SECRET` | — | Optional Google Sign-In OAuth client secret |
 | `SMTP_HOST` / `SMTP_USER` / `SMTP_PASSWORD` | — | Outbound SMTP for J-1 digests & inquiry alerts |
