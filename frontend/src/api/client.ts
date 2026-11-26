@@ -411,4 +411,19 @@ export const api = {
     req<{ events: Array<{ id: string; at: string; actor_name?: string; channel?: string; action: string; target?: string; summary: string }> }>(
       `/api/admin/audit?limit=${limit}&writes=${writes}`,
     ),
+  checkUpdate: (force = false) =>
+    req<UpdateCheckStatus>(`/api/system/update-check${force ? '?force=true' : ''}`),
 };
+
+export interface UpdateCheckStatus {
+  enabled: boolean;
+  repo: string;
+  current_sha: string;
+  latest_sha: string;
+  latest_message: string;
+  latest_date: string;
+  update_available: boolean;
+  compare_url: string;
+  update_command: string;
+  offline: boolean;
+}

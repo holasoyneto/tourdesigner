@@ -21,6 +21,7 @@ interface Props {
   activitySuggestions: SuggestionOption[];
   locale: Locale;
   inputRef?: RefObject<HTMLInputElement | null>;
+  embedded?: boolean;
   onAdd: (collection: ItemCollection, data: Record<string, unknown>, personIds: string[], label: string) => Promise<void>;
   onOpenFullEditor: (parsed: ParsedQuickAdd) => void;
 }
@@ -50,6 +51,7 @@ export function SmartQuickAdd({
   activitySuggestions,
   locale,
   inputRef,
+  embedded = false,
   onAdd,
   onOpenFullEditor,
 }: Props) {
@@ -216,131 +218,137 @@ export function SmartQuickAdd({
     ? parsed.personIds.map((id) => peopleById.get(id)?.name.split(/\s+/)[0] || '').filter(Boolean)
     : [];
 
-  return (
-    <div ref={wrapRef} className={`sqa no-print${open ? ' sqa--open' : ''}`}>
-      {/* Floating upward popover: live parsed preview and contextual suggestions */}
-      {open && (parsed || suggestions.length > 0 || flightCands.length > 0) && (
-        <div className="win sqa-pop" role="listbox">
-          {/* Live Structured Preview Strip */}
-          {parsed && (
-            <div className="sqa-preview">
-              <span className={`sqa-badge sqa-badge--${parsed.intent}`}>
-                <IntentIcon intent={parsed.intent} className="h-3 w-3" />
-                {intentLabel(parsed.intent, fr)}
-              </span>
-              {parsed.startTime && (
-                <span className="mono" style={{ fontWeight: 700 }}>
-                  {formatClock(parsed.startTime, locale)}
-                  {parsed.endTime && parsed.endTime !== parsed.startTime ? `–${formatClock(parsed.endTime, locale)}` : ''}
-                </span>
-              )}
-              <strong className="truncate">{parsed.title}</strong>
-              {parsed.location && <span className="sub truncate">· {parsed.location}</span>}
-              {parsed.refCode && <span className="mono sub">· {parsed.refCode}</span>}
-              {parsed.phone && <span className="mono sub">· {parsed.phone}</span>}
-              {parsedWhoNames.length > 0 && (
-                <span className="sqa-who">👥 {parsedWhoNames.join(', ')}</span>
-              )}
-              <span className="sqa-hints">
-                <button
-                  type="button"
-                  className="btn"
-                  style={{ minHeight: 22, padding: '0 8px', fontSize: 11.5 }}
-                  title={fr ? 'Ouvrir dans l’éditeur complet (⌘⏎)' : 'Open in full editor (⌘⏎)'}
-                  onMouseDown={(e) => {
-                    e.preventDefault();
-                    setOpen(false);
-                    onOpenFullEditor(parsed);
-                    setRaw('');
-                  }}
-                >
-                  ⌘⏎ {fr ? 'Détails' : 'Details'}
-                </button>
-              </span>
-            </div>
-          )}
+  const showPopover = embedded
+    ? Boolean(raw.trim() && (parsed || suggestions.length > 0 || flightCands.length > 0))
+    : open && Boolean(parsed || suggestions.length > 0 || flightCands.length > 0);
 
-          {/* Live FlightAware Candidates */}
-          {flightCands.length > 0 && (
-            <div className="sqa-section">
-              <div className="lab sqa-sec-lab">{fr ? 'Vols trouvés (cliquez pour remplir)' : 'Live flights found'}</div>
-              {flightCands.map((c, i) => (
-                <button key={i} type="button" className="sqa-opt" onClick={() => applyFlightCandidate(c)}>
-                  <Plane className="h-3.5 w-3.5 shrink-0 opacity-75" />
-                  <b className="mono">{String(c.dep_iata || '')} → {String(c.arr_iata || '')}</b>
-                  <span className="mono sub">{String(c.dep_time || '')}–{String(c.arr_time || '')}</span>
-                  <span className="sub truncate">{String(c.airline || '')}</span>
-                  <span className="sqa-tab">↵</span>
-                </button>
-              ))}
-            </div>
-          )}
-
-          {/* Contextual / Autocomplete Suggestions */}
-          {suggestions.length > 0 && (
-            <div className="sqa-section">
-              <div className="lab sqa-sec-lab">
-                {!raw.trim()
-                  ? fr ? 'Suggestions pour cette journée' : 'Smart suggestions for this day'
-                  : fr ? 'Autocomplétion (Tab)' : 'Autocomplete (Tab)'}
-              </div>
-              {suggestions.map((s, i) => {
-                const isOn = i === activeIdx;
-                return (
-                  <button
-                    key={s.id}
-                    type="button"
-                    role="option"
-                    aria-selected={isOn}
-                    className={`sqa-opt${isOn ? ' sqa-opt--on' : ''}`}
-                    onMouseEnter={() => setActiveIdx(i)}
-                    onMouseDown={(e) => {
-                      e.preventDefault();
-                      const isPreset = !raw.trim() && !s.fillText.endsWith(' ') && s.fillText !== 'AF';
-                      applySuggestion(s.fillText, isPreset);
-                    }}
-                  >
-                    {s.icon === 'person' ? (
-                      <Users className="h-3.5 w-3.5 shrink-0 opacity-75" />
-                    ) : s.icon === 'place' ? (
-                      <MapPin className="h-3.5 w-3.5 shrink-0 opacity-75" />
-                    ) : (
-                      <IntentIcon intent={s.intent} className="h-3.5 w-3.5 shrink-0 opacity-75" />
-                    )}
-                    <span className="truncate" style={{ fontWeight: 600 }}>{s.label}</span>
-                    {s.sub && <span className="sub truncate">{s.sub}</span>}
-                    <span className="sqa-tab mono">{i === 0 && raw.trim() ? 'Tab' : !raw.trim() ? '⏎' : ''}</span>
-                  </button>
-                );
-              })}
-            </div>
-          )}
-
-          {/* Subtle syntax chips footer */}
-          <div className="sqa-foot">
-            <button type="button" className="sqa-chip" onMouseDown={(e) => { e.preventDefault(); setRaw((v) => `${v}${v && !v.endsWith(' ') ? ' ' : ''}@`); ref.current?.focus(); }}>
-              {fr ? '@lieu' : '@venue'}
-            </button>
-            <button type="button" className="sqa-chip" onMouseDown={(e) => { e.preventDefault(); setRaw((v) => `${v}${v && !v.endsWith(' ') ? ' ' : ''}#`); ref.current?.focus(); }}>
-              {fr ? '#équipe' : '#crew'}
-            </button>
-            <button type="button" className="sqa-chip" onMouseDown={(e) => { e.preventDefault(); setRaw('AF'); ref.current?.focus(); }}>
-              {fr ? '✈ vol' : '✈ flight'}
-            </button>
-            <button type="button" className="sqa-chip" onMouseDown={(e) => { e.preventDefault(); setRaw('taxi '); ref.current?.focus(); }}>
-              🚗 taxi
-            </button>
-            <button type="button" className="sqa-chip" onMouseDown={(e) => { e.preventDefault(); setRaw(fr ? 'hotel 15h ' : 'hotel 15:00 '); ref.current?.focus(); }}>
-              {fr ? '🏨 hôtel' : '🏨 hotel'}
-            </button>
-            <span className="sqa-foot-keys">
-              <kbd>Tab</kbd>
-              <kbd>⏎</kbd>
-              <kbd>⌘⏎</kbd>
+  const popoverPanel = showPopover ? (
+    <div className={embedded ? 'sqa-pop sqa-pop--inline' : 'win sqa-pop'} role="listbox">
+      {/* Live Structured Preview Strip */}
+      {parsed && (
+        <div className="sqa-preview">
+          <span className={`sqa-badge sqa-badge--${parsed.intent}`}>
+            <IntentIcon intent={parsed.intent} className="h-3 w-3" />
+            {intentLabel(parsed.intent, fr)}
+          </span>
+          {parsed.startTime && (
+            <span className="mono" style={{ fontWeight: 700 }}>
+              {formatClock(parsed.startTime, locale)}
+              {parsed.endTime && parsed.endTime !== parsed.startTime ? `–${formatClock(parsed.endTime, locale)}` : ''}
             </span>
-          </div>
+          )}
+          <strong className="truncate">{parsed.title}</strong>
+          {parsed.location && <span className="sub truncate">· {parsed.location}</span>}
+          {parsed.refCode && <span className="mono sub">· {parsed.refCode}</span>}
+          {parsed.phone && <span className="mono sub">· {parsed.phone}</span>}
+          {parsedWhoNames.length > 0 && (
+            <span className="sqa-who">👥 {parsedWhoNames.join(', ')}</span>
+          )}
+          <span className="sqa-hints">
+            <button
+              type="button"
+              className="btn"
+              style={{ minHeight: 22, padding: '0 8px', fontSize: 11.5 }}
+              title={fr ? 'Ouvrir dans l’éditeur complet (⌘⏎)' : 'Open in full editor (⌘⏎)'}
+              onMouseDown={(e) => {
+                e.preventDefault();
+                setOpen(false);
+                onOpenFullEditor(parsed);
+                setRaw('');
+              }}
+            >
+              ⌘⏎ {fr ? 'Détails' : 'Details'}
+            </button>
+          </span>
         </div>
       )}
+
+      {/* Live FlightAware Candidates */}
+      {flightCands.length > 0 && (
+        <div className="sqa-section">
+          <div className="lab sqa-sec-lab">{fr ? 'Vols trouvés (cliquez pour remplir)' : 'Live flights found'}</div>
+          {flightCands.map((c, i) => (
+            <button key={i} type="button" className="sqa-opt" onClick={() => applyFlightCandidate(c)}>
+              <Plane className="h-3.5 w-3.5 shrink-0 opacity-75" />
+              <b className="mono">{String(c.dep_iata || '')} → {String(c.arr_iata || '')}</b>
+              <span className="mono sub">{String(c.dep_time || '')}–{String(c.arr_time || '')}</span>
+              <span className="sub truncate">{String(c.airline || '')}</span>
+              <span className="sqa-tab">↵</span>
+            </button>
+          ))}
+        </div>
+      )}
+
+      {/* Contextual / Autocomplete Suggestions */}
+      {suggestions.length > 0 && (
+        <div className="sqa-section">
+          <div className="lab sqa-sec-lab">
+            {!raw.trim()
+              ? fr ? 'Suggestions pour cette journée' : 'Smart suggestions for this day'
+              : fr ? 'Autocomplétion (Tab)' : 'Autocomplete (Tab)'}
+          </div>
+          {suggestions.map((s, i) => {
+            const isOn = i === activeIdx;
+            return (
+              <button
+                key={s.id}
+                type="button"
+                role="option"
+                aria-selected={isOn}
+                className={`sqa-opt${isOn ? ' sqa-opt--on' : ''}`}
+                onMouseEnter={() => setActiveIdx(i)}
+                onMouseDown={(e) => {
+                  e.preventDefault();
+                  const isPreset = !raw.trim() && !s.fillText.endsWith(' ') && s.fillText !== 'AF';
+                  applySuggestion(s.fillText, isPreset);
+                }}
+              >
+                {s.icon === 'person' ? (
+                  <Users className="h-3.5 w-3.5 shrink-0 opacity-75" />
+                ) : s.icon === 'place' ? (
+                  <MapPin className="h-3.5 w-3.5 shrink-0 opacity-75" />
+                ) : (
+                  <IntentIcon intent={s.intent} className="h-3.5 w-3.5 shrink-0 opacity-75" />
+                )}
+                <span className="truncate" style={{ fontWeight: 600 }}>{s.label}</span>
+                {s.sub && <span className="sub truncate">{s.sub}</span>}
+                <span className="sqa-tab mono">{i === 0 && raw.trim() ? 'Tab' : !raw.trim() ? '⏎' : ''}</span>
+              </button>
+            );
+          })}
+        </div>
+      )}
+
+      {/* Subtle syntax chips footer */}
+      <div className="sqa-foot">
+        <button type="button" className="sqa-chip" onMouseDown={(e) => { e.preventDefault(); setRaw((v) => `${v}${v && !v.endsWith(' ') ? ' ' : ''}@`); ref.current?.focus(); }}>
+          {fr ? '@lieu' : '@venue'}
+        </button>
+        <button type="button" className="sqa-chip" onMouseDown={(e) => { e.preventDefault(); setRaw((v) => `${v}${v && !v.endsWith(' ') ? ' ' : ''}#`); ref.current?.focus(); }}>
+          {fr ? '#équipe' : '#crew'}
+        </button>
+        <button type="button" className="sqa-chip" onMouseDown={(e) => { e.preventDefault(); setRaw('AF'); ref.current?.focus(); }}>
+          {fr ? '✈ vol' : '✈ flight'}
+        </button>
+        <button type="button" className="sqa-chip" onMouseDown={(e) => { e.preventDefault(); setRaw('taxi '); ref.current?.focus(); }}>
+          🚗 taxi
+        </button>
+        <button type="button" className="sqa-chip" onMouseDown={(e) => { e.preventDefault(); setRaw(fr ? 'hotel 15h ' : 'hotel 15:00 '); ref.current?.focus(); }}>
+          {fr ? '🏨 hôtel' : '🏨 hotel'}
+        </button>
+        <span className="sqa-foot-keys">
+          <kbd>Tab</kbd>
+          <kbd>⏎</kbd>
+          <kbd>⌘⏎</kbd>
+        </span>
+      </div>
+    </div>
+  ) : null;
+
+  return (
+    <div ref={wrapRef} className={`sqa no-print${open ? ' sqa--open' : ''}${embedded ? ' sqa--embedded' : ''}`}>
+      {/* Floating upward popover (standalone bottom bar) */}
+      {!embedded && popoverPanel}
 
       {/* Main Single-Line Command Input */}
       <div className="sqa-bar">
@@ -358,13 +366,17 @@ export function SmartQuickAdd({
           }}
           onKeyDown={onKeyDown}
           placeholder={
-            isMobile
+            embedded
               ? fr
-                ? 'Ajouter vol, taxi, hôtel, soundcheck…'
-                : 'Add flight, taxi, hotel, soundcheck…'
-              : fr
-                ? 'Ajouter… « 18h30 soundcheck », « taxi hotel → salle », « AF1181 »'
-                : 'Add anything… "18:30 soundcheck", "taxi hotel -> venue", "AF1181"'
+                ? 'Tapez « 18h30 soundcheck », « AF1181 », « taxi… »'
+                : 'Type "18:30 soundcheck", "AF1181", "taxi…"'
+              : isMobile
+                ? fr
+                  ? 'Ajouter vol, taxi, hôtel, soundcheck…'
+                  : 'Add flight, taxi, hotel, soundcheck…'
+                : fr
+                  ? 'Ajouter… « 18h30 soundcheck », « taxi hotel → salle », « AF1181 »'
+                  : 'Add anything… "18:30 soundcheck", "taxi hotel -> venue", "AF1181"'
           }
           autoComplete="off"
           spellCheck={false}
@@ -377,9 +389,9 @@ export function SmartQuickAdd({
         {!raw.trim() && !justAdded && (
           <kbd
             className="sqa-kbd"
-            title={fr ? (open ? 'Fermer (Esc)' : 'Raccourci : touche N') : open ? 'Close (Esc)' : 'Shortcut: press N'}
+            title={fr ? (embedded ? 'Fermer (Esc)' : open ? 'Fermer (Esc)' : 'Raccourci : touche N') : embedded ? 'Close (Esc)' : open ? 'Close (Esc)' : 'Shortcut: press N'}
           >
-            {open ? 'Esc' : 'N'}
+            {embedded || open ? 'Esc' : 'N'}
           </kbd>
         )}
         {raw.trim() && parsed && (
@@ -394,6 +406,9 @@ export function SmartQuickAdd({
           </button>
         )}
       </div>
+
+      {/* Inline downward preview/suggestions when embedded inside + Add popover */}
+      {embedded && popoverPanel}
     </div>
   );
 }

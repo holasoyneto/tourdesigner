@@ -1,6 +1,6 @@
 import { Calendar, CalendarDays, FolderOpen, Moon, Search, SlidersHorizontal, Sparkles, Sun, Users } from 'lucide-react';
 import { lazy, Suspense, useEffect, useMemo, useState } from 'react';
-import { api, type AuthMeResponse } from './api/client';
+import { api, type AuthMeResponse, type UpdateCheckStatus } from './api/client';
 import { DayPage } from './features/DayPage';
 import { Deskbar } from './features/Deskbar';
 import { TourPage } from './features/TourPage';
@@ -68,6 +68,7 @@ export function App() {
   const { path, search, navigate } = useLocationState();
   const [user, setUser] = useState<User | null>(null);
   const [authMeta, setAuthMeta] = useState<AuthMeResponse | null>(null);
+  const [updateStatus, setUpdateStatus] = useState<UpdateCheckStatus | null>(null);
   const [authChecked, setAuthChecked] = useState(false);
   const [password, setPassword] = useState('');
   const [authMode, setAuthMode] = useState<'signin' | 'signup'>('signin');
@@ -88,6 +89,22 @@ export function App() {
   const [lastGigId, setLastGigId] = useState<string>('');
   const [projects, setProjects] = useState<Project[]>([]);
   const [activeProjectId, setActiveProjectId] = useState<string>(() => localStorage.getItem('td_project') || 'all');
+
+  // Non-blocking background GitHub update check for self-hosted owners (6h server cache, offline-safe)
+  useEffect(() => {
+    if (!user || user.role !== 'owner') return;
+    if (typeof navigator !== 'undefined' && !navigator.onLine) return;
+    let alive = true;
+    api
+      .checkUpdate(false)
+      .then((res) => {
+        if (alive) setUpdateStatus(res);
+      })
+      .catch(() => undefined);
+    return () => {
+      alive = false;
+    };
+  }, [user]);
 
   // New date window state
   const [nDate, setNDate] = useState(() => new Date().toISOString().slice(0, 10));
@@ -1132,6 +1149,11 @@ export function App() {
                   projects={projects}
                   hostedUsage={authMeta?.hosted_usage || null}
                   community={authMeta?.community || null}
+                  updateStatus={updateStatus}
+                  onRefreshUpdate={async () => {
+                    const res = await api.checkUpdate(true);
+                    setUpdateStatus(res);
+                  }}
                   onOpenCommunityShare={authMeta?.community?.enabled ? () => setCommunityModal('invite') : undefined}
                   onMcpConnected={() => setMcpConnectedLocal(true)}
                   onRefreshProjects={refreshProjects}
@@ -1191,7 +1213,24 @@ export function App() {
                   </div>
                 </div>
                 <button type="button" className="item dk-tool" onClick={() => { setToolsOpen(false); navigate('/settings'); }}>
-                  <b>{fr ? 'Réglages' : 'Settings'}</b>
+                  <b style={{ display: 'inline-flex', alignItems: 'center', gap: 6 }}>
+                    {fr ? 'Réglages' : 'Settings'}
+                    {updateStatus?.update_available && (
+                      <span
+                        className="mono"
+                        style={{
+                          fontSize: 10,
+                          fontWeight: 700,
+                          padding: '1px 5px',
+                          background: 'var(--cv-ylo)',
+                          color: '#111',
+                          borderRadius: 2,
+                        }}
+                      >
+                        {fr ? 'MAJ' : 'UPDATE'}
+                      </span>
+                    )}
+                  </b>
                   <span className="sub">{fr ? 'Langue, thème, taille du texte, équipe & clés MCP, audit' : 'Language, theme, text size, team & MCP keys, audit'}</span>
                 </button>
                 {user.role !== 'viewer' && (
@@ -1273,10 +1312,26 @@ export function App() {
         <button
           type="button"
           className={`dock${toolsOpen || path === '/settings' || path === '/sync' || path === '/trash' ? ' dock--on' : ''}`}
+          style={{ position: 'relative' }}
           onClick={() => setToolsOpen((v) => !v)}
         >
           <SlidersHorizontal className="h-4 w-4" />
           <span>{fr ? 'Outils' : 'Tools'}</span>
+          {updateStatus?.update_available && (
+            <span
+              aria-label={fr ? 'Mise à jour disponible' : 'Update available'}
+              style={{
+                position: 'absolute',
+                top: 6,
+                right: 8,
+                width: 7,
+                height: 7,
+                borderRadius: '50%',
+                background: 'var(--cv-ylo)',
+                boxShadow: '0 0 0 1.5px var(--cv-chrome)',
+              }}
+            />
+          )}
         </button>
       </nav>
 

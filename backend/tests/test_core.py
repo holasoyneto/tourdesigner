@@ -1340,3 +1340,71 @@ def test_p1_p2_landing_seo_interest_multidate_ics_and_digest(tmp_path: Path, mon
         assert dig.json()["due"] == 1
         assert dig.json()["sent"] == 0
         assert dig.json()["dry_run"] is True
+
+
+def test_github_update_check(tmp_path: Path, monkeypatch):
+    """Self-hosted GitHub update check detects newer commits and degrades gracefully offline."""
+    from app.api import integrations
+    from app.config import get_settings
+
+    client, _ = _make_client(tmp_path)
+
+    class _FakeResp:
+        def __init__(self, status_code: int, payload: dict):
+            self.status_code = status_code
+            self._payload = payload
+
+        def json(self):
+            return self._payload
+
+    # Reset cache and pin local BUILD_SHA
+    integrations._UPDATE_CACHE.update({"checked_at": 0.0, "repo": "", "latest": None})
+    monkeypatch.setenv("BUILD_SHA", "aaaa111")
+    monkeypatch.setenv("TENANCY_MODE", "single")
+    get_settings.cache_clear()
+
+    # 1. Newer commit on GitHub main -> update_available=True
+    monkeypatch.setattr(
+        integrations.httpx,
+        "get",
+        lambda *a, **kw: _FakeResp(
+            200,
+            {
+                "sha": "bbbb222999999999999999999999999999999999",
+                "commit": {
+                    "message": "feat: unified Add menu & update checker\n\ndetails",
+                    "committer": {"date": "2026-11-26T00:00:00Z"},
+                },
+            },
+        ),
+    )
+    with client:
+        r1 = client.get("/api/system/update-check")
+        assert r1.status_code == 200
+        d1 = r1.json()
+        assert d1["enabled"] is True
+        assert d1["current_sha"] == "aaaa111"
+        assert d1["latest_sha"] == "bbbb222"
+        assert d1["update_available"] is True
+        assert "aaaa111...bbbb222" in d1["compare_url"]
+        assert d1["latest_message"] == "feat: unified Add menu & update checker"
+
+        # 2. Matching SHA -> update_available=False (with force=true bypassing 6h cache)
+        monkeypatch.setenv("BUILD_SHA", "bbbb222")
+        get_settings.cache_clear()
+        r2 = client.get("/api/system/update-check?force=true")
+        assert r2.status_code == 200
+        assert r2.json()["update_available"] is False
+
+        # 3. Offline / network error -> graceful offline=True, never 500
+        def _boom(*a, **kw):
+            raise RuntimeError("offline")
+
+        monkeypatch.setattr(integrations.httpx, "get", _boom)
+        r3 = client.get("/api/system/update-check?force=true")
+        assert r3.status_code == 200
+        d3 = r3.json()
+        assert d3["enabled"] is True
+        assert d3["offline"] is True
+        assert d3["update_available"] is False
+    get_settings.cache_clear()

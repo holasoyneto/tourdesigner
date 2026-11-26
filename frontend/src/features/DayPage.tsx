@@ -32,7 +32,6 @@ import {
   Undo2,
   Upload,
   Users,
-  Zap,
 } from 'lucide-react';
 import { lazy, Suspense, useCallback, useEffect, useMemo, useRef, useState, type ClipboardEvent, type KeyboardEvent, type MouseEvent } from 'react';
 import { api } from '../api/client';
@@ -271,6 +270,13 @@ export function DayPage({ gig, items, allGigs, allItemsByGig, people, projects =
     };
   }, [entryMenuOpen, moreMenuOpen]);
 
+  // Auto-focus the unified SmartQuickAdd input whenever the + Add popover opens
+  useEffect(() => {
+    if (!entryMenuOpen) return;
+    const raf = window.requestAnimationFrame(() => quickAddInputRef.current?.focus());
+    return () => window.cancelAnimationFrame(raf);
+  }, [entryMenuOpen]);
+
   const flashCopy = (id: string, text: string) => {
     void navigator.clipboard?.writeText(text).catch(() => undefined);
     setCopiedKey(id);
@@ -299,7 +305,9 @@ export function DayPage({ gig, items, allGigs, allItemsByGig, people, projects =
       }
       if (!e.metaKey && !e.ctrlKey && !e.altKey && e.key.toLowerCase() === 'n') {
         e.preventDefault();
-        quickAddInputRef.current?.focus();
+        setMoreMenuOpen(false);
+        setEntryMenuOpen(true);
+        window.requestAnimationFrame(() => quickAddInputRef.current?.focus());
         return;
       }
       if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === 'z') {
@@ -1062,6 +1070,7 @@ export function DayPage({ gig, items, allGigs, allItemsByGig, people, projects =
               type="button"
               className={`btn${entryMenuOpen ? ' dk-sect--on' : !nextRow?.refCode ? ' btn--def' : ''}`}
               aria-expanded={entryMenuOpen}
+              title={fr ? 'Ajouter à cette journée (touche N)' : 'Add to this day (press N)'}
               onClick={() => { setEntryMenuOpen((v) => !v); setMoreMenuOpen(false); }}
             >
               + {fr ? 'Ajouter' : 'Add'}
@@ -1097,9 +1106,54 @@ export function DayPage({ gig, items, allGigs, allItemsByGig, people, projects =
             {dossierOpen ? <PanelRightClose className="h-3.5 w-3.5" /> : <PanelRightOpen className="h-3.5 w-3.5" />}
           </button>
 
-          {/* Crisp Floating + Ajouter Command Popover (Zero layout jump, Esc & outside-click dismiss!) */}
+          {/* Unified + Ajouter Command Popover (SmartQuickAdd + structured grid + Paste AI/PDF) */}
           {canEdit && entryMenuOpen && (
             <div className="win dk-addmenu" role="menu" aria-label={fr ? 'Compléter la journée' : 'Fill day sheet'}>
+              <div className="dk-addmenu__quick">
+                <SmartQuickAdd
+                  embedded
+                  gig={gig}
+                  items={items}
+                  people={people}
+                  onDatePersonIds={onDatePersonIds}
+                  placeSuggestions={placeSuggestions}
+                  activitySuggestions={activitySuggestions}
+                  locale={locale}
+                  inputRef={quickAddInputRef}
+                  onAdd={async (collection, data, personIds, label) => {
+                    const newId = await sync.addGigItem(gig.id, collection, data, personIds);
+                    setEntryMenuOpen(false);
+                    setSelectedKey(newId);
+                    setFlashRowKey(newId);
+                    window.setTimeout(() => setFlashRowKey((cur) => (cur === newId ? null : cur)), 1400);
+                    window.requestAnimationFrame(() => {
+                      listRef.current?.querySelector<HTMLElement>(`[data-row-key="${newId}"]`)?.scrollIntoView({ block: 'nearest', behavior: 'smooth' });
+                    });
+                    pushUndo({
+                      label: `${fr ? 'Ajout' : 'Add'} · ${label}`,
+                      revert: () => sync.removeGigItem(gig.id, newId),
+                      redo: async () => { await sync.addGigItem(gig.id, collection, data, personIds); },
+                    });
+                    say(fr ? `Ajouté · ${label} (⌘Z pour annuler)` : `Added · ${label} (⌘Z to undo)`);
+                  }}
+                  onOpenFullEditor={(p) => {
+                    setEntryMenuOpen(false);
+                    const col =
+                      p.collection === 'flights' || p.collection === 'transport' || p.collection === 'hotels'
+                        ? p.collection
+                        : 'schedule';
+                    setRowEditor({
+                      kind: 'add',
+                      collection: col,
+                      presetTime: p.startTime,
+                      travelKind: p.intent === 'train' ? 'train' : p.intent === 'ground' ? 'ground' : p.intent === 'flight' ? 'flight' : undefined,
+                      presetData: p.data,
+                      presetPersonIds: p.personIds,
+                    });
+                  }}
+                />
+              </div>
+
               <div className="dk-addmenu__sec">
                 <div className="lab dk-addmenu__lab">{fr ? 'Sur la journée' : 'On the day sheet'}</div>
                 <div className="dk-addmenu__grid">
@@ -1163,24 +1217,12 @@ export function DayPage({ gig, items, allGigs, allItemsByGig, people, projects =
               <div className="dk-addmenu__foot">
                 <button
                   type="button"
-                  className="btn"
-                  style={{ flex: 1, minHeight: 28, fontSize: 12 }}
-                  onClick={() => {
-                    setEntryMenuOpen(false);
-                    quickAddInputRef.current?.focus();
-                  }}
-                >
-                  <Zap className="h-3.5 w-3.5" />
-                  {fr ? 'Saisie rapide (N)' : 'Quick bar (N)'}
-                </button>
-                <button
-                  type="button"
                   className="btn btn--def"
                   style={{ flex: 1, minHeight: 28, fontSize: 12 }}
                   onClick={() => { setEntryMenuOpen(false); setShowIntake(true); }}
                 >
                   <Sparkles className="h-3.5 w-3.5" />
-                  {fr ? 'Coller AI / PDF' : 'Paste AI / PDF'}
+                  {fr ? 'Coller email / AI / PDF' : 'Paste email / AI / PDF'}
                 </button>
               </div>
             </div>
@@ -1516,49 +1558,6 @@ export function DayPage({ gig, items, allGigs, allItemsByGig, people, projects =
             })}
 
           </div>
-
-          {/* Pinned quick-add command bar (shortcut: N) */}
-          {canEdit && (
-            <SmartQuickAdd
-              gig={gig}
-              items={items}
-              people={people}
-              onDatePersonIds={onDatePersonIds}
-              placeSuggestions={placeSuggestions}
-              activitySuggestions={activitySuggestions}
-              locale={locale}
-              inputRef={quickAddInputRef}
-              onAdd={async (collection, data, personIds, label) => {
-                const newId = await sync.addGigItem(gig.id, collection, data, personIds);
-                setSelectedKey(newId);
-                setFlashRowKey(newId);
-                window.setTimeout(() => setFlashRowKey((cur) => (cur === newId ? null : cur)), 1400);
-                window.requestAnimationFrame(() => {
-                  listRef.current?.querySelector<HTMLElement>(`[data-row-key="${newId}"]`)?.scrollIntoView({ block: 'nearest', behavior: 'smooth' });
-                });
-                pushUndo({
-                  label: `${fr ? 'Ajout' : 'Add'} · ${label}`,
-                  revert: () => sync.removeGigItem(gig.id, newId),
-                  redo: async () => { await sync.addGigItem(gig.id, collection, data, personIds); },
-                });
-                say(fr ? `Ajouté · ${label} (⌘Z pour annuler)` : `Added · ${label} (⌘Z to undo)`);
-              }}
-              onOpenFullEditor={(p) => {
-                const col =
-                  p.collection === 'flights' || p.collection === 'transport' || p.collection === 'hotels'
-                    ? p.collection
-                    : 'schedule';
-                setRowEditor({
-                  kind: 'add',
-                  collection: col,
-                  presetTime: p.startTime,
-                  travelKind: p.intent === 'train' ? 'train' : p.intent === 'ground' ? 'ground' : p.intent === 'flight' ? 'flight' : undefined,
-                  presetData: p.data,
-                  presetPersonIds: p.personIds,
-                });
-              }}
-            />
-          )}
 
           {/* Multi-Row Bulk Selection Bar (only appears when rows are multi-selected) */}
           {multiKeys.size > 0 && (

@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react';
-import { api, type CommunityShareConfig, type HostedUsage } from '../api/client';
+import { api, type CommunityShareConfig, type HostedUsage, type UpdateCheckStatus } from '../api/client';
 import type { CopyDict } from '../i18n/copy';
 import { fullUrl, withBase } from '../lib/basePath';
 import { purgeOfflineCopy } from '../offline/db';
@@ -17,6 +17,8 @@ interface Props {
   projects: Project[];
   hostedUsage?: HostedUsage | null;
   community?: CommunityShareConfig | null;
+  updateStatus?: UpdateCheckStatus | null;
+  onRefreshUpdate?: () => Promise<void>;
   onOpenCommunityShare?: () => void;
   onMcpConnected?: () => void;
   onRefreshProjects: () => Promise<void>;
@@ -79,6 +81,8 @@ export function SettingsPage({
   projects,
   hostedUsage,
   community,
+  updateStatus,
+  onRefreshUpdate,
   onOpenCommunityShare,
   onMcpConnected,
   onRefreshProjects,
@@ -405,6 +409,9 @@ export function SettingsPage({
 
   const isHostedWorkspace = Boolean(aiCfg?.hosted_locked || aiCfg?.hosted_model);
   const isHostedLocked = Boolean(aiCfg?.hosted_locked);
+  const [checkingUpdate, setCheckingUpdate] = useState(false);
+  const [copiedUpdate, setCopiedUpdate] = useState<'cmd' | 'ai' | null>(null);
+
   const modelInList = aiModels.some((m) => m.id === aiModel);
 
   return (
@@ -423,6 +430,132 @@ export function SettingsPage({
       </div>
 
       <div className="flex-1 overflow-y-auto bg-[var(--cv-paper)]">
+        {updateStatus?.enabled && (
+          <>
+            <div className="sep">
+              {fr ? 'Version & mises à jour GitHub' : 'Version & GitHub updates'}
+            </div>
+            <div
+              className="person-row"
+              style={{
+                flexDirection: 'column',
+                alignItems: 'stretch',
+                gap: 8,
+                background: updateStatus.update_available ? 'var(--cv-next)' : undefined,
+              }}
+            >
+              <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 10, flexWrap: 'wrap' }}>
+                <div>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
+                    <strong>
+                      {updateStatus.update_available
+                        ? fr
+                          ? 'Nouvelle version disponible sur GitHub'
+                          : 'New update available on GitHub'
+                        : updateStatus.offline
+                          ? fr
+                            ? 'Vérification hors ligne'
+                            : 'Offline — skipped update check'
+                          : fr
+                            ? 'À jour avec GitHub'
+                            : 'Up to date with GitHub'}
+                    </strong>
+                    {updateStatus.current_sha && (
+                      <span className="mono sub" style={{ fontSize: 11.5 }}>
+                        {updateStatus.update_available && updateStatus.latest_sha
+                          ? `${updateStatus.current_sha} → ${updateStatus.latest_sha}`
+                          : updateStatus.current_sha}
+                      </span>
+                    )}
+                  </div>
+                  {updateStatus.update_available && updateStatus.latest_message && (
+                    <div className="sub" style={{ fontSize: 11.5, marginTop: 2 }}>
+                      {updateStatus.latest_message}
+                    </div>
+                  )}
+                </div>
+                <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
+                  {updateStatus.compare_url && (
+                    <a
+                      href={updateStatus.compare_url}
+                      target="_blank"
+                      rel="noreferrer"
+                      className="btn"
+                      style={{ textDecoration: 'none' }}
+                    >
+                      {updateStatus.update_available
+                        ? fr ? 'Voir les changements ↗' : 'View changes ↗'
+                        : 'GitHub ↗'}
+                    </a>
+                  )}
+                  {onRefreshUpdate && (
+                    <button
+                      type="button"
+                      className="btn"
+                      disabled={checkingUpdate}
+                      onClick={async () => {
+                        setCheckingUpdate(true);
+                        try {
+                          await onRefreshUpdate();
+                        } finally {
+                          setCheckingUpdate(false);
+                        }
+                      }}
+                    >
+                      {checkingUpdate
+                        ? fr ? 'Vérification…' : 'Checking…'
+                        : fr ? 'Vérifier' : 'Check now'}
+                    </button>
+                  )}
+                </div>
+              </div>
+
+              {updateStatus.update_available && (
+                <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap', alignItems: 'center' }}>
+                  <code
+                    className="mono"
+                    style={{
+                      flex: 1,
+                      minWidth: 220,
+                      fontSize: 11.5,
+                      padding: '5px 8px',
+                      background: 'var(--cv-paper)',
+                      border: '1px solid var(--cv-line2)',
+                      overflowX: 'auto',
+                      whiteSpace: 'nowrap',
+                    }}
+                  >
+                    {updateStatus.update_command}
+                  </code>
+                  <button
+                    type="button"
+                    className="btn btn--def"
+                    onClick={() => {
+                      void navigator.clipboard?.writeText(updateStatus.update_command).catch(() => undefined);
+                      setCopiedUpdate('cmd');
+                      window.setTimeout(() => setCopiedUpdate((c) => (c === 'cmd' ? null : c)), 1800);
+                    }}
+                  >
+                    {copiedUpdate === 'cmd' ? (fr ? 'Copié ✓' : 'Copied ✓') : fr ? 'Copier la commande' : 'Copy command'}
+                  </button>
+                  <button
+                    type="button"
+                    className="btn"
+                    onClick={() => {
+                      const prompt = `Pull the latest commits from https://github.com/${updateStatus.repo} (origin/main) and rebuild/restart my local Tour Designer instance without touching my .env or local data.`;
+                      void navigator.clipboard?.writeText(prompt).catch(() => undefined);
+                      setCopiedUpdate('ai');
+                      window.setTimeout(() => setCopiedUpdate((c) => (c === 'ai' ? null : c)), 1800);
+                    }}
+                  >
+                    {copiedUpdate === 'ai' ? (fr ? 'Prompt copié ✓' : 'Prompt copied ✓') : fr ? 'Prompt Claude / Codex' : 'Claude / Codex prompt'}
+                  </button>
+                </div>
+              )}
+            </div>
+          </>
+        )}
+
         <div className="sep">{fr ? 'Affichage & langue' : 'Display & language'}</div>
         {community?.enabled && onOpenCommunityShare && (
           <div className="person-row">

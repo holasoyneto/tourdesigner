@@ -8,10 +8,12 @@ RUN mkdir -p /build/backend/static/v3 && npm run build
 
 # Stage 2: Stateless Python API + static asset runtime
 FROM python:3.12-slim
+ARG BUILD_SHA=""
 ENV PYTHONUNBUFFERED=1 \
     PYTHONDONTWRITEBYTECODE=1 \
     PIP_NO_CACHE_DIR=1 \
     PORT=8080 \
+    BUILD_SHA=${BUILD_SHA} \
     REPO_BACKEND=sqlite \
     FILE_STORAGE_BACKEND=local \
     LOCAL_DB_PATH=/app/data/tour-designer-v2.sqlite3 \

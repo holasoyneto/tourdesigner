@@ -109,6 +109,17 @@ class Settings(BaseSettings):
     calendar_sync_calendar_id: str = ""
     static_dir: str = str(Path(__file__).resolve().parent.parent / "static")
 
+    # Self-hosted GitHub update check (non-blocking, 6h cache, offline-safe)
+    build_sha: str = ""
+    update_check_repo: str = "holasoyneto/tourdesigner"
+    enable_update_check: bool | None = None
+
+    @property
+    def update_check_enabled(self) -> bool:
+        if self.enable_update_check is not None:
+            return bool(self.enable_update_check)
+        return self.tenancy_mode == "single"
+
     @property
     def cors_list(self) -> list[str]:
         return [o.strip() for o in self.cors_origins.split(",") if o.strip()]

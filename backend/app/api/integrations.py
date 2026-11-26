@@ -6,9 +6,12 @@ import html
 import os
 import secrets
 import smtplib
+import subprocess
+import time
 import unicodedata
 from datetime import datetime, timedelta, timezone
 from email.message import EmailMessage
+from pathlib import Path
 from typing import Any
 
 import httpx
@@ -554,3 +557,147 @@ def roadsheet_pdf(gig_id: str, request: Request):
         return Response(content=pdf_bytes, media_type="application/pdf")
     except ImportError:
         return HTMLResponse(html_doc, headers={"X-PDF-Fallback": "html"})
+
+
+# ── Self-hosted GitHub Update Checker (non-blocking, 6h cache, offline-safe) ──
+_UPDATE_CACHE: dict[str, Any] = {"checked_at": 0.0, "repo": "", "latest": None}
+_UPDATE_CACHE_TTL_SECONDS = 6 * 3600
+_LOCAL_SHA_CACHE: str | None = None
+
+
+def _resolve_local_sha(build_sha: str) -> str:
+    """Resolve current running commit SHA (short 7-char) from env BUILD_SHA or local git."""
+    cleaned = (build_sha or "").strip()
+    if cleaned:
+        return cleaned[:7].lower()
+    global _LOCAL_SHA_CACHE
+    if _LOCAL_SHA_CACHE is not None:
+        return _LOCAL_SHA_CACHE
+    try:
+        repo_root = Path(__file__).resolve().parents[3]
+        res = subprocess.run(
+            ["git", "rev-parse", "--short=7", "HEAD"],
+            cwd=str(repo_root),
+            capture_output=True,
+            text=True,
+            timeout=1.5,
+            check=False,
+        )
+        sha = (res.stdout or "").strip().lower()[:7]
+        _LOCAL_SHA_CACHE = sha
+        return sha
+    except Exception:
+        _LOCAL_SHA_CACHE = ""
+        return ""
+
+
+@router.get("/system/update-check")
+def check_github_update(request: Request, force: bool = Query(default=False)):
+    """Check GitHub main branch for newer commits (for self-hosted/local installs)."""
+    owner = require_owner(request)
+    if isinstance(owner, JSONResponse):
+        return owner
+
+    cfg = get_settings()
+    repo = (cfg.update_check_repo or "holasoyneto/tourdesigner").strip()
+    local_sha = _resolve_local_sha(cfg.build_sha)
+    update_cmd = "git pull origin main && docker compose up -d --build"
+    commits_url = f"https://github.com/{repo}/commits/main"
+
+    if not cfg.update_check_enabled:
+        return ok(
+            enabled=False,
+            repo=repo,
+            current_sha=local_sha,
+            latest_sha="",
+            latest_message="",
+            latest_date="",
+            update_available=False,
+            compare_url=commits_url,
+            update_command=update_cmd,
+            offline=False,
+        )
+
+    now_ts = time.monotonic()
+    cached = (
+        _UPDATE_CACHE.get("latest")
+        if not force
+        and _UPDATE_CACHE.get("repo") == repo
+        and (now_ts - float(_UPDATE_CACHE.get("checked_at", 0.0))) < _UPDATE_CACHE_TTL_SECONDS
+        else None
+    )
+
+    latest = cached
+    offline = False
+    if latest is None:
+        try:
+            resp = httpx.get(
+                f"https://api.github.com/repos/{repo}/commits/main",
+                headers={
+                    "Accept": "application/vnd.github+json",
+                    "User-Agent": "tour-designer-update-check",
+                },
+                timeout=3.0,
+            )
+            if resp.status_code == 200:
+                payload = resp.json()
+                full_sha = str(payload.get("sha") or "").strip().lower()
+                commit_obj = payload.get("commit") or {}
+                raw_msg = str(commit_obj.get("message") or "").strip()
+                first_line = raw_msg.splitlines()[0].strip() if raw_msg else ""
+                date_str = str(
+                    (commit_obj.get("committer") or {}).get("date")
+                    or (commit_obj.get("author") or {}).get("date")
+                    or ""
+                )
+                latest = {
+                    "full_sha": full_sha,
+                    "short_sha": full_sha[:7],
+                    "message": first_line,
+                    "date": date_str,
+                }
+                _UPDATE_CACHE["checked_at"] = now_ts
+                _UPDATE_CACHE["repo"] = repo
+                _UPDATE_CACHE["latest"] = latest
+            else:
+                offline = True
+        except Exception:
+            offline = True
+
+    if not latest:
+        return ok(
+            enabled=True,
+            repo=repo,
+            current_sha=local_sha,
+            latest_sha="",
+            latest_message="",
+            latest_date="",
+            update_available=False,
+            compare_url=commits_url,
+            update_command=update_cmd,
+            offline=offline,
+        )
+
+    latest_full = str(latest.get("full_sha") or "")
+    latest_short = str(latest.get("short_sha") or "")
+    update_available = bool(
+        local_sha and latest_full and not latest_full.startswith(local_sha.lower())
+    )
+    compare_url = (
+        f"https://github.com/{repo}/compare/{local_sha}...{latest_short}"
+        if (local_sha and latest_short and update_available)
+        else commits_url
+    )
+
+    return ok(
+        enabled=True,
+        repo=repo,
+        current_sha=local_sha,
+        latest_sha=latest_short,
+        latest_message=str(latest.get("message") or ""),
+        latest_date=str(latest.get("date") or ""),
+        update_available=update_available,
+        compare_url=compare_url,
+        update_command=update_cmd,
+        offline=False,
+    )

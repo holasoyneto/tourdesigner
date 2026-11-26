@@ -1316,10 +1316,32 @@ html, body, #root {
   right: 0;
   top: calc(100% + 5px);
   z-index: 45;
-  width: 344px;
+  width: min(412px, calc(100vw - 24px));
   background: var(--cv-paper);
   box-shadow: 0 12px 32px rgba(0, 0, 0, 0.36);
   animation: sqaRise 120ms cubic-bezier(0.16, 1, 0.3, 1);
+}
+.dk-addmenu__quick {
+  border-bottom: 1px solid var(--cv-line2);
+  background: var(--cv-paper2);
+}
+.sqa--embedded {
+  border-top: 0;
+  background: transparent;
+}
+.sqa--embedded.sqa--open {
+  box-shadow: none;
+}
+.sqa--embedded .sqa-bar {
+  padding: 8px 10px;
+  min-height: 40px;
+}
+.sqa-pop--inline {
+  position: static;
+  box-shadow: none;
+  border-top: 1px solid var(--cv-line);
+  background: var(--cv-paper);
+  animation: sqaFade 110ms ease-out;
 }
 .dk-addmenu__sec {
   padding: 8px 10px;
