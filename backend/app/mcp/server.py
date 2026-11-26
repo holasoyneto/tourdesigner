@@ -10,9 +10,11 @@ from __future__ import annotations
 import base64
 import hashlib
 import hmac
+import io
 import ipaddress
 import json
 import re
+import secrets
 import socket
 import time
 from datetime import date, datetime, timedelta, timezone
@@ -42,6 +44,7 @@ from app.domain.models import (
     Gig,
     GigItem,
     GigStatus,
+    ShareLink,
     User,
     new_id,
 )
@@ -55,7 +58,7 @@ from app.domain.roles import (
     scrub_item,
 )
 from app.repo.protocol import ActorContext, ConflictError, NotFoundError, TourRepo
-from app.repo.tenants import parse_scoped_token
+from app.repo.tenants import parse_scoped_token, scope_token
 
 router = APIRouter(tags=["mcp"])
 _MAX_BODY_BYTES = 2 * 1024 * 1024
@@ -494,6 +497,8 @@ def _tool_list(user: User) -> list[dict[str, Any]]:
                 "type": "object",
                 "properties": {
                     "gig_id": {"type": "string"},
+                    "person_id": {"type": "string", "description": "Optional crew/artist person ID to filter files"},
+                    "person_name": {"type": "string", "description": "Optional crew/artist name to filter files (e.g. boarding passes for a specific person)"},
                     "doc_kind": {"type": "string", "description": "e.g. boarding_pass, hotel, rider, passport, contract"},
                     "query": {"type": "string"},
                 },
@@ -501,7 +506,7 @@ def _tool_list(user: User) -> list[dict[str, Any]]:
         },
         {
             "name": "get_file",
-            "description": "Retrieve a file (boarding pass, voucher, rider, PDF) with a 15-minute signed download URL and inline image/text preview for AI chat.",
+            "description": "Retrieve a vaulted document (boarding pass, PDF contract, tech rider, hotel confirmation) with a 15-minute signed download URL, inline images, and extracted inline text for PDFs so AI can read contracts directly.",
             "inputSchema": {
                 "type": "object",
                 "properties": {
@@ -548,6 +553,25 @@ def _tool_list(user: User) -> list[dict[str, Any]]:
                     "scope": {"type": "string", "enum": ["crew", "private"]},
                 },
                 "required": ["file_id"],
+            },
+        },
+        {
+            "name": "create_share_link",
+            "description": "Create a zero-login, role-scrubbed /link/<key> roadsheet URL to send to crew, artist, driver, or promoter (fees, buyouts, and private passports are automatically stripped).",
+            "inputSchema": {
+                "type": "object",
+                "properties": {
+                    "scope": {
+                        "type": "string",
+                        "enum": ["gig_crew", "gig_master", "person"],
+                        "default": "gig_crew",
+                        "description": "gig_crew = single show crew sheet; gig_master = full day sheet; person = personal schedule across dates for one crew member",
+                    },
+                    "gig_id": {"type": "string"},
+                    "person_id": {"type": "string"},
+                    "person_name": {"type": "string", "description": "Optional crew/artist name to auto-match when scope='person'"},
+                    "label": {"type": "string", "description": "Optional human label, e.g. 'Paris Crew Link'"},
+                },
             },
         },
     ]
@@ -649,6 +673,32 @@ def _get_prompt(name: str, args: dict[str, Any]) -> dict[str, Any] | None:
             ],
         }
     return None
+
+
+def _extract_pdf_text(raw: bytes, max_chars: int = 32000) -> tuple[str, int]:
+    """Extract readable text from a PDF contract, confirmation, or rider cleanly and safely."""
+    try:
+        from pypdf import PdfReader
+
+        reader = PdfReader(io.BytesIO(raw))
+        page_count = len(reader.pages)
+        chunks: list[str] = []
+        total = 0
+        for idx, page in enumerate(reader.pages, start=1):
+            try:
+                txt = (page.extract_text() or "").strip()
+            except Exception:
+                txt = ""
+            if not txt:
+                continue
+            block = f"--- Page {idx} ---\n{txt}" if page_count > 1 else txt
+            chunks.append(block)
+            total += len(block)
+            if total >= max_chars:
+                break
+        return "\n\n".join(chunks)[:max_chars], page_count
+    except Exception:
+        return "", 0
 
 
 def _normalize_mcp_item_data(col: str, raw: dict[str, Any]) -> dict[str, Any]:
@@ -1070,9 +1120,15 @@ async def _call_tool(
 
     if name == "list_files":
         gid_f = str(args.get("gig_id") or "").strip() or None
+        pid_f = str(args.get("person_id") or "").strip() or None
+        pname_f = str(args.get("person_name") or "").strip().lower()
+        if not pid_f and pname_f:
+            match = next((p for p in repo.list_people() if pname_f in p.name.lower()), None)
+            if match:
+                pid_f = match.id
         kind_f = str(args.get("doc_kind") or "").strip().lower()
         q = str(args.get("query") or "").strip().lower()
-        files = repo.list_files(gig_id=gid_f)
+        files = repo.list_files(gig_id=gid_f, person_id=pid_f)
         visible_gigs: set[str] | None = None
         if user.artist_ids:
             visible_gigs = {g.id for g in repo.list_gigs() if can_access_gig(user, g)}
@@ -1150,12 +1206,20 @@ async def _call_tool(
         if include_content:
             raw_preview: bytes | None = None
             preview_mime = mime
+            is_pdf = mime == "application/pdf" or rec.name.lower().endswith(".pdf")
             is_preview_type = (
                 mime in {"image/png", "image/jpeg", "image/webp", "image/gif"}
                 or mime.startswith("text/")
                 or mime == "application/json"
+                or is_pdf
             )
-            max_preview = 2 * 1024 * 1024 if mime.startswith("image/") else 64 * 1024
+            max_preview = (
+                10 * 1024 * 1024
+                if is_pdf
+                else 2 * 1024 * 1024
+                if mime.startswith("image/")
+                else 64 * 1024
+            )
             if is_preview_type and settings and settings.file_storage_backend == "gcs" and rec.gcs_key and settings.file_vault_bucket and not rec.gcs_key.startswith("local/"):
                 try:
                     raw_preview = download_gcs_bytes(settings.file_vault_bucket, rec.gcs_key, max_bytes=max_preview)
@@ -1173,6 +1237,12 @@ async def _call_tool(
                 if preview_mime in {"image/png", "image/jpeg", "image/webp", "image/gif"}:
                     b64 = base64.b64encode(raw_preview).decode("ascii")
                     extra_blocks.append({"type": "image", "data": b64, "mimeType": preview_mime})
+                elif preview_mime == "application/pdf" or is_pdf:
+                    pdf_text, page_count = _extract_pdf_text(raw_preview, max_chars=32000)
+                    if page_count:
+                        payload["page_count"] = page_count
+                    if pdf_text:
+                        payload["text_content"] = pdf_text
                 elif (preview_mime.startswith("text/") or preview_mime == "application/json") and len(raw_preview) <= 64 * 1024:
                     payload["text_content"] = raw_preview.decode("utf-8", errors="replace")[:32000]
 
@@ -1320,6 +1390,57 @@ async def _call_tool(
             )
         )
         return {"ok": True, "file": saved.model_dump(mode="json")}
+
+    if name == "create_share_link":
+        scope = str(args.get("scope") or "gig_crew").strip()
+        if scope not in {"person", "gig_master", "gig_crew"}:
+            return {"ok": False, "error": "invalid_scope"}
+        gid = str(args.get("gig_id") or "").strip() or None
+        pid = str(args.get("person_id") or "").strip() or None
+        if gid:
+            gig = repo.get_gig(gid)
+            if not gig or not can_access_gig(user, gig):
+                return {"ok": False, "error": "gig_not_found"}
+        if not pid and args.get("person_name"):
+            pname = str(args.get("person_name") or "").strip().lower()
+            match = next((p for p in repo.list_people() if pname in p.name.lower()), None)
+            if match:
+                pid = match.id
+        if scope == "person" and not pid:
+            return {"ok": False, "error": "person_required"}
+        if scope in {"gig_crew", "gig_master"} and not gid:
+            return {"ok": False, "error": "gig_id_required"}
+
+        raw_key = secrets.token_urlsafe(16)
+        scoped_key = scope_token(tenant_id, raw_key)
+        link = ShareLink(
+            key=scoped_key,
+            scope=scope,  # type: ignore[arg-type]
+            gig_id=gid,
+            person_id=pid,
+            label=str(args.get("label") or "").strip()[:120],
+            enabled=True,
+            can_edit=False,
+        )
+        saved = repo.upsert_share_link(link)
+        settings = getattr(request.app.state, "settings", None) if request else None
+        origin = (
+            (settings.public_origin if settings else "").rstrip("/")
+            or (str(request.base_url).rstrip("/") if request else "")
+        )
+        base = settings.normalized_base_path if settings else ""
+        url = f"{origin}{base}/link/{saved.key}"
+        repo.append_audit(
+            AuditEvent(
+                actor_id=user.id,
+                actor_name=user.name,
+                channel="mcp",
+                action="mcp_create_share_link",
+                target_id=saved.key,
+                summary=f"Created {scope} share link",
+            )
+        )
+        return {"ok": True, "url": url, "share": saved.model_dump(mode="json")}
 
     return {"ok": False, "error": f"unknown_tool:{name}"}
 

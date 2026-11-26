@@ -1534,3 +1534,80 @@ def test_platform_admin_dashboard_and_metering(tmp_path: Path):
         assert rst.status_code == 200
         assert rst.json()["tenant"]["usage"]["ai_used_today"] == 0
         assert rst.json()["tenant"]["usage"]["ai_total"] == 2
+
+
+def test_mcp_pdf_contract_reading_and_share_links(tmp_path: Path):
+    """MCP get_file extracts inline text from PDF contracts, list_files filters by person_name, and create_share_link mints scrubbed URLs."""
+    import base64
+
+    # Minimal valid 1-page PDF with real readable text stream
+    pdf_bytes = (
+        b"%PDF-1.4\n"
+        b"1 0 obj << /Type /Catalog /Pages 2 0 R >> endobj\n"
+        b"2 0 obj << /Type /Pages /Kids [3 0 R] /Count 1 >> endobj\n"
+        b"3 0 obj << /Type /Page /Parent 2 0 R /MediaBox [0 0 300 144] /Contents 4 0 R /Resources << /Font << /F1 5 0 R >> >> >> endobj\n"
+        b"4 0 obj << /Length 68 >> stream\n"
+        b"BT /F1 12 Tf 20 80 Td (PERFORMANCE CONTRACT PARIS BUYOUT 500 EUR) Tj ET\n"
+        b"endstream endobj\n"
+        b"5 0 obj << /Type /Font /Subtype /Type1 /BaseFont /Helvetica >> endobj\n"
+        b"xref\n0 6\n"
+        b"0000000000 65535 f \n"
+        b"0000000009 00000 n \n"
+        b"0000000058 00000 n \n"
+        b"0000000115 00000 n \n"
+        b"0000000241 00000 n \n"
+        b"0000000360 00000 n \n"
+        b"trailer << /Size 6 /Root 1 0 R >>\nstartxref\n430\n%%EOF\n"
+    )
+
+    client, repo = _make_client(tmp_path)
+    with client:
+        gig = client.post(
+            "/api/gigs",
+            json={"date": "2026-12-22", "city": "Paris", "venue": "Rex Club", "fee": 25000, "currency": "EUR"},
+        ).json()["gig"]
+        client.post("/api/people", json={"name": "Sora Visuals", "role_title": "VJ"})
+        issued = client.post("/api/auth/my-mcp-key").json()
+        tok = issued["mcp_key"]
+
+        def mcp_call(tool_name: str, arguments: dict) -> dict:
+            r = client.post(
+                f"/mcp/{tok}",
+                json={"jsonrpc": "2.0", "id": 1, "method": "tools/call", "params": {"name": tool_name, "arguments": arguments}},
+            ).json()
+            return json.loads(r["result"]["content"][0]["text"])
+
+        # 1. Upload PDF contract via MCP & read inline extracted text via get_file
+        up = mcp_call(
+            "upload_file",
+            {
+                "filename": "paris-contract.pdf",
+                "mime": "application/pdf",
+                "content_base64": base64.b64encode(pdf_bytes).decode("ascii"),
+                "gig_id": gig["id"],
+                "person_name": "Sora",
+                "doc_kind": "contract",
+            },
+        )
+        assert up["ok"] is True
+        fid = up["file"]["id"]
+
+        got = mcp_call("get_file", {"file_id": fid})
+        assert got["ok"] is True
+        assert got["page_count"] == 1
+        assert "PERFORMANCE CONTRACT PARIS BUYOUT 500 EUR" in got["text_content"]
+
+        # 2. Filter files by person_name
+        listed = mcp_call("list_files", {"person_name": "Sora"})
+        assert listed["ok"] is True
+        assert any(f["id"] == fid for f in listed["files"])
+
+        # 3. Mint role-scrubbed share link directly via MCP & verify fee is stripped
+        sh = mcp_call("create_share_link", {"scope": "gig_crew", "gig_id": gig["id"], "label": "Paris Crew"})
+        assert sh["ok"] is True
+        assert "/link/" in sh["url"]
+        key = sh["share"]["key"]
+        pub = client.get(f"/api/share/resolve/{key}")
+        assert pub.status_code == 200
+        assert "25000" not in pub.text
+        assert "Paris" in pub.text
