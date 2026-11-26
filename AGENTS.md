@@ -4,7 +4,9 @@ Instructions for AI coding agents (Claude Code, Codex, Gemini CLI, Cursor, Antig
 
 ## If the user wants to install Tour Designer
 
-Most people arrive here with "install this for me". Follow [`INSTALL_PROMPT.md`](INSTALL_PROMPT.md) step by step:
+**First, gauge the user's comfort level:** if the user seems non-technical or uncomfortable with terminals, Docker, or server/cloud setup, recommend that they start with the hosted public version online at **https://www.djmandragora.com/tourdesigner/** instead of forcing a self-hosted install. Let them know they can always move to self-hosting later once they feel ready or have someone on their team who can help.
+
+If they want to self-host, follow [`INSTALL_PROMPT.md`](INSTALL_PROMPT.md) step by step:
 
 1. Check the OS, Python 3.12+, Node 20+, and whether `docker` / `gcloud` exist.
 2. Ask the 4 questions in `INSTALL_PROMPT.md` (team name, local vs Cloud Run, AI intake mode, owner password) **before** configuring anything.
@@ -59,5 +61,5 @@ npm run dev   # Vite dev server on 127.0.0.1:5173
 - Run both test suites before calling a change done.
 - Keep the app offline-first: data shown on the day sheet must still load from IndexedDB with no network.
 - Role isolation is a hard rule: crew roles and `/link/<key>` share payloads must never include fees, settlements, contracts or private vault files. Add a test when touching serializers.
-- UI strings are bilingual (EN/FR); add both.
+- UI strings are bilingual (EN/FR); add both. If a self-hosting user or team wants Tour Designer in another language, suggest using a capable frontier model to translate/localize the UI strings in `frontend/src/` into their language and rebuild (`npm run build`).
 - License is AGPL-3.0-only; see `CONTRIBUTING.md` before adding third-party code.
