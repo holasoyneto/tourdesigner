@@ -347,8 +347,8 @@ export function LandingPage({ locale, onLocale, hostedPlan, landingVideoUrl, onN
               </div>
               <p className="sub m-0 leading-relaxed">
                 {fr
-                  ? 'Toute la tournée, vos PNR et vos cartes d’embarquement s’ouvrent instantanément depuis la mémoire locale sur iOS, Android et Mac.'
-                  : 'Your full itinerary, hotel confirmations, and boarding passes mirror locally on mobile and desktop — booting immediately with dead signal.'}
+                  ? 'Toute la tournée, vos PNR et vos cartes d’embarquement restent en cache local sur iOS, Android et Mac — consultables sans réseau, avec synchro automatique dès le retour du signal.'
+                  : 'Your full itinerary, hotel confirmations, and boarding passes stay cached on mobile and desktop — readable with zero signal, with queued edits syncing once you reconnect.'}
               </p>
             </div>
 
@@ -470,8 +470,8 @@ export function LandingPage({ locale, onLocale, hostedPlan, landingVideoUrl, onN
               </div>
               <p className="sub m-0 leading-relaxed">
                 {fr
-                  ? 'Espace cloud isolé, synchronisation hors ligne multi-appareils, coffre-fort documents chiffré, serveur MCP mobile et export JSON complet à tout moment.'
-                  : 'Isolated workspace with offline multi-device sync, encrypted document & passport vault, mobile MCP assistant access, and full 1-click JSON export.'}
+                  ? 'Espace cloud isolé, cache hors ligne local (les modifs se synchronisent dès le retour du réseau), coffre-fort documents chiffré, serveur MCP mobile et export JSON complet.'
+                  : 'Isolated workspace with local offline cache (edits sync automatically once back online), encrypted document & passport vault, mobile MCP assistant access, and 1-click JSON export.'}
               </p>
               <div className="mono sub space-y-1 pt-1 text-[11px]">
                 <div>· {fr ? 'Jusqu’à 200 dates & 250 Mo de coffre-fort' : 'Up to 200 tour dates & 250 MB document vault'}</div>
