@@ -34,6 +34,7 @@ export interface AuthMeResponse {
   share_footer_branding?: boolean;
   community?: CommunityShareConfig | null;
   tenant_id?: string | null;
+  is_platform_admin?: boolean;
   reason?: string | null;
   legal?: {
     operator_name: string;
@@ -413,7 +414,93 @@ export const api = {
     ),
   checkUpdate: (force = false) =>
     req<UpdateCheckStatus>(`/api/system/update-check${force ? '?force=true' : ''}`),
+  platformAdminOverview: () =>
+    req<PlatformAdminOverview>('/api/platform-admin/overview'),
+  platformAdminUpdateTenant: (
+    tenantId: string,
+    patch: {
+      plan?: string;
+      ai_daily_limit?: number | null;
+      max_gigs?: number | null;
+      max_files_mb?: number | null;
+      suspended?: boolean;
+      admin_notes?: string;
+    },
+  ) =>
+    req<{ tenant: PlatformTenantRecord }>(`/api/platform-admin/tenants/${encodeURIComponent(tenantId)}`, {
+      method: 'PATCH',
+      body: JSON.stringify(patch),
+    }),
+  platformAdminResetAi: (tenantId: string) =>
+    req<{ tenant: PlatformTenantRecord }>(`/api/platform-admin/tenants/${encodeURIComponent(tenantId)}/reset-ai`, {
+      method: 'POST',
+    }),
 };
+
+export interface PlatformTenantRecord {
+  tenant_id: string;
+  name: string;
+  email: string;
+  auth_provider: 'google' | 'email';
+  plan: string;
+  created_at: string;
+  last_login_at: string;
+  suspended: boolean;
+  admin_notes: string;
+  usage: {
+    gigs_count: number;
+    max_gigs: number;
+    people_count: number;
+    files_count: number;
+    storage_mb: number;
+    max_files_mb: number;
+    ai_used_today: number;
+    ai_daily_limit: number;
+    ai_total: number;
+    team_count: number;
+    mcp_active: boolean;
+  };
+  overrides: {
+    plan?: string | null;
+    ai_daily_limit?: number | null;
+    max_gigs?: number | null;
+    max_files_mb?: number | null;
+  };
+}
+
+export interface PlatformAdminOverview {
+  summary: {
+    tenancy_mode: 'single' | 'multi';
+    total_tenants: number;
+    active_24h: number;
+    active_7d: number;
+    suspended_count: number;
+    total_gigs: number;
+    total_people: number;
+    total_files: number;
+    total_storage_mb: number;
+    ai_used_today: number;
+    ai_total: number;
+    mcp_enabled_tenants: number;
+    leads_count: number;
+    defaults: {
+      plan: string;
+      ai_daily_limit: number;
+      max_gigs: number;
+      max_files_mb: number;
+    };
+  };
+  tenants: PlatformTenantRecord[];
+  leads: Array<{
+    id?: string;
+    at?: string;
+    name?: string;
+    email?: string;
+    org?: string;
+    roster_size?: string;
+    message?: string;
+  }>;
+}
 
 export interface UpdateCheckStatus {
   enabled: boolean;

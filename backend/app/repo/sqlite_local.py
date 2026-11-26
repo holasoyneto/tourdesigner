@@ -915,6 +915,20 @@ class LocalSqliteRepo:
             )
             self._conn.commit()
 
+    def list_settings_prefix(self, prefix: str) -> dict[str, Any]:
+        with self._lock:
+            rows = self._conn.execute(
+                "SELECT key, value FROM settings WHERE key LIKE ?",
+                (f"{prefix}%",),
+            ).fetchall()
+        out: dict[str, Any] = {}
+        for r in rows:
+            try:
+                out[str(r["key"])] = json.loads(r["value"])
+            except Exception:
+                continue
+        return out
+
     def append_audit(self, event: AuditEvent) -> None:
         with self._lock:
             self._conn.execute(

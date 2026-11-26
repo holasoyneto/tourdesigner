@@ -183,11 +183,14 @@ def auth_me(request: Request) -> JSONResponse:
     hosted_usage = (
         get_hosted_usage(get_repo(request), settings) if settings.tenancy_mode == "multi" else None
     )
+    from app.api.platform_admin import is_platform_admin
+
     return ok(
         authenticated=True,
         user=_user_wire(user),
         tenant_id=get_tenant_id(request),
         hosted_usage=hosted_usage,
+        is_platform_admin=is_platform_admin(user, settings),
         **base_meta,
     )
 

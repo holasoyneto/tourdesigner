@@ -11,6 +11,9 @@ import { purgeOfflineCopy } from './offline/db';
 import { useTourSync } from './offline/sync';
 import type { GigStatus, Locale, Project, SkinPref, User } from './types';
 
+const AdminDashboardPage = lazy(() =>
+  import('./features/AdminDashboardPage').then((m) => ({ default: m.AdminDashboardPage })),
+);
 const CalendarPage = lazy(() => import('./features/CalendarPage').then((m) => ({ default: m.CalendarPage })));
 const CommunityShareModal = lazy(() =>
   import('./features/CommunityShareModal').then((m) => ({ default: m.CommunityShareModal })),
@@ -914,7 +917,9 @@ export function App() {
           ? fr ? 'Documents' : 'Files'
           : path === '/sync'
             ? fr ? 'Enregistrement' : 'Saving'
-            : path === '/trash'
+            : path === '/admin'
+              ? fr ? 'Admin Plateforme' : 'Platform Admin'
+              : path === '/trash'
               ? fr ? 'Dates retirées' : 'Removed dates'
               : path === '/settings'
                 ? copy.settings
@@ -1138,6 +1143,8 @@ export function App() {
                 />
               ) : path === '/trash' ? (
                 <TrashPage gigs={visibleGigs} user={user} locale={locale} onRefresh={sync.refreshFull} />
+              ) : path === '/admin' && authMeta?.is_platform_admin ? (
+                <AdminDashboardPage locale={locale} />
               ) : path === '/settings' ? (
                 <SettingsPage
                   user={user}
@@ -1212,6 +1219,26 @@ export function App() {
                     </button>
                   </div>
                 </div>
+                {authMeta?.is_platform_admin && (
+                  <button type="button" className="item dk-tool" onClick={() => { setToolsOpen(false); navigate('/admin'); }}>
+                    <b style={{ display: 'inline-flex', alignItems: 'center', gap: 6 }}>
+                      {fr ? 'Admin Plateforme' : 'Platform Admin'}
+                      <span
+                        className="mono"
+                        style={{
+                          fontSize: 10,
+                          fontWeight: 700,
+                          padding: '1px 5px',
+                          border: '1px solid var(--cv-y1)',
+                          color: 'var(--cv-y1)',
+                        }}
+                      >
+                        OPS
+                      </span>
+                    </b>
+                    <span className="sub">{fr ? 'Utilisateurs, quotas IA/stockage, analytics et support' : 'Users, AI/storage metering, analytics & support'}</span>
+                  </button>
+                )}
                 <button type="button" className="item dk-tool" onClick={() => { setToolsOpen(false); navigate('/settings'); }}>
                   <b style={{ display: 'inline-flex', alignItems: 'center', gap: 6 }}>
                     {fr ? 'Réglages' : 'Settings'}

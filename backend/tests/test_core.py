@@ -1469,3 +1469,68 @@ def test_public_file_vault_isolation_and_drive_block(tmp_path: Path, monkeypatch
         assert client.patch(f"/api/files/{rec.id}", json={"scope": "crew"}).status_code == 404
         assert client.delete(f"/api/files/{rec.id}").status_code == 404
     get_settings.cache_clear()
+
+
+def test_platform_admin_dashboard_and_metering(tmp_path: Path):
+    """Super-admin dashboard meters all tenants, enforces strict email authz, and applies custom quota overrides."""
+    from app.repo.tenants import record_hosted_ai_use
+
+    settings = Settings(
+        env="prod",
+        repo_backend="sqlite",
+        local_db_path=str(tmp_path / "root.sqlite3"),
+        file_vault_local_path=str(tmp_path / "vault"),
+        tenancy_mode="multi",
+        platform_admin_emails="neto@example.com",
+    )
+    app = create_app(settings=settings)
+
+    with TestClient(app) as client:
+        # 1. Regular user registers, creates a show, uses AI -> MUST get 403 on platform-admin
+        r_reg = client.post(
+            "/api/auth/register",
+            json={"name": "Artist One", "email": "artist1@example.com", "password": "strongpassword1", "consent": True},
+        )
+        assert r_reg.status_code == 201
+        me_user = client.get("/api/auth/me").json()
+        assert me_user["is_platform_admin"] is False
+        user_tenant_id = me_user["tenant_id"]
+        assert client.post("/api/gigs", json={"date": "2026-12-20", "city": "Tokyo", "venue": "Womb"}).status_code == 201
+        t_repo = app.state.tenant_manager.get_repo(user_tenant_id)
+        record_hosted_ai_use(t_repo)
+        record_hosted_ai_use(t_repo)
+        assert client.get("/api/platform-admin/overview").status_code == 403
+
+        # 2. Operator (neto@example.com) registers & signs in -> sees full platform overview
+        assert client.post("/api/auth/logout").status_code == 200
+        r_admin = client.post(
+            "/api/auth/register",
+            json={"name": "Neto", "email": "neto@example.com", "password": "strongpassword1", "consent": True},
+        )
+        assert r_admin.status_code == 201
+        assert client.get("/api/auth/me").json()["is_platform_admin"] is True
+
+        ov = client.get("/api/platform-admin/overview")
+        assert ov.status_code == 200
+        data = ov.json()
+        assert data["summary"]["total_tenants"] == 2
+        assert data["summary"]["total_gigs"] == 1
+        assert data["summary"]["ai_used_today"] == 2
+        assert data["summary"]["ai_total"] == 2
+
+        # 3. Operator upgrades artist1's plan & quotas + adds support notes + resets AI counter
+        upd = client.patch(
+            f"/api/platform-admin/tenants/{user_tenant_id}",
+            json={"plan": "Pro", "ai_daily_limit": 100, "max_gigs": 500, "admin_notes": "VIP tour manager"},
+        )
+        assert upd.status_code == 200
+        t_updated = upd.json()["tenant"]
+        assert t_updated["plan"] == "Pro"
+        assert t_updated["usage"]["ai_daily_limit"] == 100
+        assert t_updated["usage"]["max_gigs"] == 500
+        assert t_updated["admin_notes"] == "VIP tour manager"
+
+        rst = client.post(f"/api/platform-admin/tenants/{user_tenant_id}/reset-ai")
+        assert rst.status_code == 200
+        assert rst.json()["tenant"]["usage"]["ai_used_today"] == 0
+        assert rst.json()["tenant"]["usage"]["ai_total"] == 2

@@ -19,6 +19,7 @@ from app.api.gigs import router as gigs_router
 from app.api.intake import router as intake_router
 from app.api.integrations import router as integrations_router
 from app.api.people import router as people_router
+from app.api.platform_admin import router as platform_admin_router
 from app.api.shares import router as shares_router
 from app.config import Settings, get_settings
 from app.domain.auth import (
@@ -242,6 +243,7 @@ def create_app(settings: Settings | None = None, repo: TourRepo | None = None) -
         files_router,
         intake_router,
         integrations_router,
+        platform_admin_router,
         mcp_router,
     ):
         app.include_router(rtr)

@@ -255,6 +255,21 @@ class TenantManager:
             self.root_repo.set_setting(f"tenant_meta:{tenant_id}", meta)
         return tenant_id, repo
 
+    def list_tenant_metas(self) -> list[dict[str, Any]]:
+        """List all tenant_meta:* records from root_repo (sorted newest login first)."""
+        lister = getattr(self.root_repo, "list_settings_prefix", None)
+        if not callable(lister):
+            return []
+        raw_map = lister("tenant_meta:")
+        metas: list[dict[str, Any]] = []
+        for key, val in raw_map.items():
+            if isinstance(val, dict):
+                tid = str(val.get("tenant_id") or key.removeprefix("tenant_meta:"))
+                if is_valid_tenant_id(tid):
+                    metas.append({**val, "tenant_id": tid})
+        metas.sort(key=lambda m: str(m.get("last_login_at") or m.get("created_at") or ""), reverse=True)
+        return metas
+
     def close_all(self) -> None:
         with self._lock:
             for repo in self._cache.values():
@@ -271,38 +286,79 @@ def _utc_today() -> str:
     return datetime.now(timezone.utc).strftime("%Y-%m-%d")
 
 
+def _effective_limits(repo: TourRepo, settings: Settings) -> tuple[str, int, int, int]:
+    overrides = repo.get_setting("hosted_overrides", {})
+    if not isinstance(overrides, dict):
+        overrides = {}
+    plan = str(overrides.get("plan") or settings.hosted_plan_name).strip() or settings.hosted_plan_name
+    ai_limit = (
+        int(overrides["ai_daily_limit"])
+        if overrides.get("ai_daily_limit") is not None
+        else settings.hosted_ai_daily_limit
+    )
+    max_gigs = (
+        int(overrides["max_gigs"])
+        if overrides.get("max_gigs") is not None
+        else settings.hosted_max_gigs
+    )
+    max_files_mb = (
+        int(overrides["max_files_mb"])
+        if overrides.get("max_files_mb") is not None
+        else settings.hosted_max_files_mb
+    )
+    return plan, max(0, ai_limit), max(0, max_gigs), max(0, max_files_mb)
+
+
 def get_hosted_usage(repo: TourRepo, settings: Settings) -> dict[str, Any]:
     raw = repo.get_setting("hosted_usage", {})
     today = _utc_today()
     ai_used = int(raw.get("ai_count", 0)) if isinstance(raw, dict) and raw.get("ai_date") == today else 0
+    ai_total = int(raw.get("ai_total", ai_used)) if isinstance(raw, dict) else ai_used
     gigs_count = len(repo.list_gigs())
     total_bytes = sum(max(0, int(f.size or 0)) for f in repo.list_files())
     storage_mb = round(total_bytes / (1024 * 1024), 2)
+    plan, ai_daily_limit, max_gigs, max_files_mb = _effective_limits(repo, settings)
     return {
-        "plan": settings.hosted_plan_name,
+        "plan": plan,
         "ai_used_today": ai_used,
-        "ai_daily_limit": settings.hosted_ai_daily_limit,
+        "ai_total": ai_total,
+        "ai_daily_limit": ai_daily_limit,
         "gigs_count": gigs_count,
-        "max_gigs": settings.hosted_max_gigs,
+        "max_gigs": max_gigs,
         "storage_mb": storage_mb,
-        "max_files_mb": settings.hosted_max_files_mb,
+        "max_files_mb": max_files_mb,
     }
 
 
 def check_hosted_ai_quota(repo: TourRepo, settings: Settings) -> tuple[bool, int, int]:
     """Return `(allowed, used_today, daily_limit)` for hosted Gemini usage."""
-    if settings.tenancy_mode != "multi" or settings.hosted_ai_daily_limit <= 0:
-        return True, 0, settings.hosted_ai_daily_limit
+    _, daily_limit, _, _ = _effective_limits(repo, settings)
+    if settings.tenancy_mode != "multi" or daily_limit <= 0:
+        return True, 0, daily_limit
     raw = repo.get_setting("hosted_usage", {})
     today = _utc_today()
     used = int(raw.get("ai_count", 0)) if isinstance(raw, dict) and raw.get("ai_date") == today else 0
-    return used < settings.hosted_ai_daily_limit, used, settings.hosted_ai_daily_limit
+    return used < daily_limit, used, daily_limit
 
 
 def record_hosted_ai_use(repo: TourRepo) -> int:
     today = _utc_today()
     raw = repo.get_setting("hosted_usage", {})
     prev = int(raw.get("ai_count", 0)) if isinstance(raw, dict) and raw.get("ai_date") == today else 0
+    prev_total = int(raw.get("ai_total", prev)) if isinstance(raw, dict) else prev
     nxt = prev + 1
-    repo.set_setting("hosted_usage", {"ai_date": today, "ai_count": nxt, "updated_at": now_iso()})
+    repo.set_setting(
+        "hosted_usage",
+        {"ai_date": today, "ai_count": nxt, "ai_total": prev_total + 1, "updated_at": now_iso()},
+    )
     return nxt
+
+
+def reset_hosted_ai_today(repo: TourRepo) -> None:
+    today = _utc_today()
+    raw = repo.get_setting("hosted_usage", {})
+    prev_total = int(raw.get("ai_total", 0)) if isinstance(raw, dict) else 0
+    repo.set_setting(
+        "hosted_usage",
+        {"ai_date": today, "ai_count": 0, "ai_total": prev_total, "updated_at": now_iso()},
+    )

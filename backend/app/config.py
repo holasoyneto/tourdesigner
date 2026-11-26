@@ -114,6 +114,13 @@ class Settings(BaseSettings):
     update_check_repo: str = "holasoyneto/tourdesigner"
     enable_update_check: bool | None = None
 
+    # Platform super-admin dashboard (/admin) — comma-separated operator emails
+    platform_admin_emails: str = ""
+
+    @property
+    def platform_admin_email_set(self) -> set[str]:
+        return {e.strip().lower() for e in (self.platform_admin_emails or "").split(",") if e.strip()}
+
     @property
     def update_check_enabled(self) -> bool:
         if self.enable_update_check is not None:

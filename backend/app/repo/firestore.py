@@ -635,6 +635,13 @@ class FirestoreRepo:
     def set_setting(self, key: str, value: Any) -> None:
         self._col("settings").document(key).set({"value": value, "updated_at": now_iso()})
 
+    def list_settings_prefix(self, prefix: str) -> dict[str, Any]:
+        out: dict[str, Any] = {}
+        for snap in self._col("settings").stream():
+            if snap.id.startswith(prefix):
+                out[snap.id] = (snap.to_dict() or {}).get("value")
+        return out
+
     def append_audit(self, event: AuditEvent) -> None:
         self._col("audit_log").document(event.id).set(event.model_dump(mode="json"))
 
